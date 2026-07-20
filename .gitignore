@@ -1,0 +1,13 @@
+.DS_Store
+*.log
+*.tmp
+*.swp
+
+/vendor/
+/node_modules/
+/build/
+/dist/
+
+.env
+.env.*
+!.env.example

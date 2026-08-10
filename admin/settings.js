@@ -79,6 +79,17 @@
 			};
 		}
 
+		if ( model.features && 'object' === typeof model.features ) {
+			Object.keys( model.features ).forEach( function ( feature ) {
+				if ( model.features[ feature ] && ! capabilities[ feature ] && 'text' !== feature ) {
+					capabilities[ feature ] = {
+						key: feature,
+						label: capabilityLabel( 'structured_output' === feature ? 'Structured output' : feature )
+					};
+				}
+			} );
+		}
+
 		return Object.keys( capabilities ).map( function ( key ) {
 			return capabilities[ key ];
 		} );
@@ -156,6 +167,12 @@
 
 		Array.prototype.forEach.call( selects, function ( select ) {
 			var seen = {};
+			var capability = select.dataset.capability || 'text';
+			var selected = select.dataset.selected || '';
+
+			while ( select.options.length > 1 ) {
+				select.remove( 1 );
+			}
 
 			Array.prototype.forEach.call( select.options, function ( option ) {
 				seen[ option.value ] = true;
@@ -164,7 +181,7 @@
 			models.forEach( function ( model ) {
 				var option;
 
-				if ( ! model || ! model.id || seen[ model.id ] ) {
+				if ( ! model || ! model.id || seen[ model.id ] || ! modelSupportsTask( model, capability ) ) {
 					return;
 				}
 
@@ -179,7 +196,38 @@
 				select.appendChild( option );
 				seen[ model.id ] = true;
 			} );
+
+			if ( selected && ! seen[ selected ] ) {
+				var unavailable = document.createElement( 'option' );
+				unavailable.value = selected;
+				unavailable.textContent = selected + ' ' + __( '(unavailable or incompatible)', textDomain );
+				unavailable.selected = true;
+				select.appendChild( unavailable );
+			}
 		} );
+	}
+
+	function modelSupportsTask( model, task ) {
+		var features = model.features || {};
+		var capabilities = Array.isArray( model.supportedCapabilities ) ? model.supportedCapabilities : [];
+
+		if ( 'text' === task ) {
+			return !! features.text || capabilities.indexOf( 'text_generation' ) !== -1;
+		}
+		if ( 'vision' === task ) {
+			return !! features.vision || modelHasVision( model );
+		}
+		if ( 'image' === task ) {
+			return !! features.image || capabilities.indexOf( 'image_generation' ) !== -1;
+		}
+		if ( 'embedding' === task ) {
+			return !! features.embedding || capabilities.indexOf( 'embedding_generation' ) !== -1;
+		}
+		if ( 'tools' === task ) {
+			return !! features.tools;
+		}
+
+		return false;
 	}
 
 	function setStatus( status, message, isError ) {
@@ -256,7 +304,7 @@
 
 	function initializeThinkingSupport() {
 		var config = getConfig();
-		var modelSelect = document.getElementById( 'zctz_ollama_ai_connector_settings-preferred-model' );
+		var modelSelect = document.getElementById( 'zctz_ollama_ai_connector_settings-model-text' );
 		var thinkingSelect = document.getElementById( 'zctz_ollama_ai_connector_settings-thinking' );
 		var supportMessage = document.getElementById( 'zctz_ollama_ai_connector_settings-thinking-support' );
 		var strings = config && config.thinkingStrings ? config.thinkingStrings : {};
@@ -301,9 +349,86 @@
 		updateThinkingSupport();
 	}
 
+	function initializeDiagnostics() {
+		var config = getConfig();
+		var button = document.getElementById( 'zctz-ollama-run-diagnostics' );
+		var results = document.getElementById( 'zctz-ollama-diagnostics-results' );
+		var spinner = document.getElementById( 'zctz-ollama-diagnostics-spinner' );
+
+		if ( ! config || ! config.diagnosticsAjaxUrl || ! wp.apiFetch || ! button || ! results ) {
+			return;
+		}
+
+		button.addEventListener( 'click', function () {
+			button.disabled = true;
+			spinner.classList.add( 'is-active' );
+			results.textContent = __( 'Running diagnostics…', textDomain );
+
+			wp.apiFetch( { url: config.diagnosticsAjaxUrl } )
+				.then( function ( response ) {
+					if ( ! response || ! response.success || ! response.data ) {
+						throw new Error( __( 'Diagnostics returned an unexpected response.', textDomain ) );
+					}
+					renderDiagnostics( response.data, results );
+				} )
+				.catch( function ( error ) {
+					results.textContent = error && error.message ? error.message : __( 'Diagnostics failed.', textDomain );
+					results.className = 'notice notice-error inline';
+				} )
+				.finally( function () {
+					button.disabled = false;
+					spinner.classList.remove( 'is-active' );
+				} );
+		} );
+	}
+
+	function renderDiagnostics( report, container ) {
+		var rows = [
+			[ __( 'Connection', textDomain ), report.connected ? __( 'Connected', textDomain ) : __( 'Not connected', textDomain ) ],
+			[ __( 'Endpoint', textDomain ), report.endpoint || '—' ],
+			[ __( 'HTTP status', textDomain ), report.httpStatus || '—' ],
+			[ __( 'Latency', textDomain ), String( report.latencyMs ) + ' ms' ],
+			[ __( 'Ollama version', textDomain ), report.ollamaVersion || __( 'Cloud or unavailable', textDomain ) ],
+			[ __( 'Available models', textDomain ), String( report.modelCount ) ],
+			[ __( 'AI Client version', textDomain ), report.aiClientVersion || __( 'Unavailable', textDomain ) ],
+			[ __( 'Embeddings', textDomain ), report.embeddingsReady ? __( 'Ready', textDomain ) : __( 'Requires WordPress 7.1 / PHP AI Client 1.4', textDomain ) ],
+			[ __( 'Streaming', textDomain ), report.streamingReady ? __( 'Ready', textDomain ) : __( 'PHP cURL is unavailable', textDomain ) ]
+		];
+		var table = document.createElement( 'table' );
+		var tbody = document.createElement( 'tbody' );
+
+		container.innerHTML = '';
+		container.className = report.connected ? 'notice notice-success inline' : 'notice notice-error inline';
+		rows.forEach( function ( row ) {
+			var tr = document.createElement( 'tr' );
+			var th = document.createElement( 'th' );
+			var td = document.createElement( 'td' );
+			th.scope = 'row';
+			th.textContent = row[ 0 ];
+			td.textContent = row[ 1 ];
+			tr.appendChild( th );
+			tr.appendChild( td );
+			tbody.appendChild( tr );
+		} );
+		table.appendChild( tbody );
+		container.appendChild( table );
+
+		if ( report.error ) {
+			var error = document.createElement( 'p' );
+			error.textContent = report.error;
+			container.appendChild( error );
+		}
+		if ( report.missingDefaults && Object.keys( report.missingDefaults ).length ) {
+			var warning = document.createElement( 'p' );
+			warning.textContent = __( 'One or more selected default models are unavailable. Review the model selectors above.', textDomain );
+			container.appendChild( warning );
+		}
+	}
+
 	document.addEventListener( 'DOMContentLoaded', function () {
 		initializeConnectionRows();
 		initializeThinkingSupport();
+		initializeDiagnostics();
 		loadModels();
 	} );
 }( window, document ) );

@@ -14,6 +14,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 use WP_Error;
+use Zactonz\AiProviderForOllama\Diagnostics\OllamaDiagnostics;
 use WordPress\AiClient\AiClient;
 use WordPress\AiClient\Providers\Http\DTO\ApiKeyRequestAuthentication;
 
@@ -37,12 +38,16 @@ class OllamaSettings {
 	private const AJAX_ACTION                    = 'zctz_ollama_ai_connector_list_models';
 	private const AJAX_MODEL_CAPABILITIES_ACTION = 'zctz_ollama_ai_connector_model_capabilities';
 	private const AJAX_SAVE_CONNECTION_ACTION    = 'zctz_ollama_ai_connector_save_connection';
+	private const AJAX_DIAGNOSTICS_ACTION        = 'zctz_ollama_ai_connector_diagnostics';
 	private const NONCE_ACTION                   = 'zctz_ollama_ai_connector_nonce';
 	private const CONNECTION_CLOUD               = 'cloud';
 	private const CONNECTION_SELF_HOSTED         = 'self_hosted';
 	private const THINKING_DEFAULT               = 'default';
 	private const THINKING_ENABLED               = 'enabled';
 	private const THINKING_DISABLED              = 'disabled';
+	private const THINKING_LOW                   = 'low';
+	private const THINKING_MEDIUM                = 'medium';
+	private const THINKING_HIGH                  = 'high';
 
 	/**
 	 * Initializes the settings.
@@ -58,11 +63,14 @@ class OllamaSettings {
 		add_action( 'wp_ajax_' . self::AJAX_ACTION, array( $this, 'ajax_list_models' ) );
 		add_action( 'wp_ajax_' . self::AJAX_MODEL_CAPABILITIES_ACTION, array( $this, 'ajax_model_capabilities' ) );
 		add_action( 'wp_ajax_' . self::AJAX_SAVE_CONNECTION_ACTION, array( $this, 'ajax_save_connection' ) );
+		add_action( 'wp_ajax_' . self::AJAX_DIAGNOSTICS_ACTION, array( $this, 'ajax_diagnostics' ) );
 		add_filter( 'wpai_has_ai_credentials', array( $this, 'is_connected' ) );
 		add_filter( 'wpai_is_ollama_connector_configured', array( $this, 'is_connected' ) );
-		add_filter( 'wpai_preferred_text_models', array( $this, 'prepend_default_model_preference' ) );
-		add_filter( 'wpai_preferred_image_models', array( $this, 'prepend_default_model_preference' ) );
-		add_filter( 'wpai_preferred_vision_models', array( $this, 'prepend_default_model_preference' ) );
+		add_filter( 'wpai_preferred_text_models', array( $this, 'prepend_default_text_model_preference' ) );
+		add_filter( 'wpai_preferred_image_models', array( $this, 'prepend_default_image_model_preference' ) );
+		add_filter( 'wpai_preferred_vision_models', array( $this, 'prepend_default_vision_model_preference' ) );
+		add_filter( 'wpai_preferred_embedding_models', array( $this, 'prepend_default_embedding_model_preference' ) );
+		add_filter( 'wpai_preferred_tool_models', array( $this, 'prepend_default_tools_model_preference' ) );
 	}
 
 	/**
@@ -76,6 +84,22 @@ class OllamaSettings {
 			$legacy_settings = get_option( self::LEGACY_OPTION_NAME, false );
 			if ( is_array( $legacy_settings ) ) {
 				update_option( self::OPTION_NAME, $legacy_settings, false );
+			}
+		}
+
+		$current_settings = get_option( self::OPTION_NAME, array() );
+		if ( is_array( $current_settings ) ) {
+			$changed = false;
+			if ( ! isset( $current_settings['model_text'] ) && ! empty( $current_settings['model'] ) ) {
+				$current_settings['model_text'] = (string) $current_settings['model'];
+				$changed                        = true;
+			}
+			if ( isset( $current_settings['thinking'] ) && self::THINKING_ENABLED === $current_settings['thinking'] ) {
+				$current_settings['thinking'] = self::THINKING_MEDIUM;
+				$changed                      = true;
+			}
+			if ( $changed ) {
+				update_option( self::OPTION_NAME, $current_settings, false );
 			}
 		}
 
@@ -162,14 +186,26 @@ class OllamaSettings {
 			)
 		);
 
-		add_settings_field(
-			self::OPTION_NAME . '_preferred_model',
-			__( 'Default Model', 'zactonz-ai-provider-ollama' ),
-			array( $this, 'render_preferred_model_field' ),
-			self::PAGE_SLUG,
-			self::SECTION_ID,
-			array( 'label_for' => self::OPTION_NAME . '-preferred-model' )
+		$model_fields = array(
+			'text'      => __( 'Default Text Model', 'zactonz-ai-provider-ollama' ),
+			'vision'    => __( 'Default Vision Model', 'zactonz-ai-provider-ollama' ),
+			'image'     => __( 'Default Image Model', 'zactonz-ai-provider-ollama' ),
+			'embedding' => __( 'Default Embedding Model', 'zactonz-ai-provider-ollama' ),
+			'tools'     => __( 'Default Tool Model', 'zactonz-ai-provider-ollama' ),
 		);
+		foreach ( $model_fields as $capability => $label ) {
+			add_settings_field(
+				self::OPTION_NAME . '_model_' . $capability,
+				$label,
+				array( $this, 'render_capability_model_field' ),
+				self::PAGE_SLUG,
+				self::SECTION_ID,
+				array(
+					'capability' => $capability,
+					'label_for'  => self::OPTION_NAME . '-model-' . $capability,
+				)
+			);
+		}
 
 		add_settings_field(
 			self::OPTION_NAME . '_thinking',
@@ -178,6 +214,23 @@ class OllamaSettings {
 			self::PAGE_SLUG,
 			self::SECTION_ID,
 			array( 'label_for' => self::OPTION_NAME . '-thinking' )
+		);
+
+		add_settings_field(
+			self::OPTION_NAME . '_embedding_request_timeout',
+			__( 'Embedding Request Timeout', 'zactonz-ai-provider-ollama' ),
+			array( $this, 'render_embedding_request_timeout_field' ),
+			self::PAGE_SLUG,
+			self::SECTION_ID,
+			array( 'label_for' => self::OPTION_NAME . '-embedding-request-timeout' )
+		);
+
+		add_settings_field(
+			self::OPTION_NAME . '_diagnostics',
+			__( 'Diagnostics', 'zactonz-ai-provider-ollama' ),
+			array( $this, 'render_diagnostics_field' ),
+			self::PAGE_SLUG,
+			self::SECTION_ID
 		);
 
 		add_settings_field(
@@ -229,6 +282,7 @@ class OllamaSettings {
 		if ( ! is_array( $value ) ) {
 			return array();
 		}
+		$existing = self::get_settings();
 
 		$connection_type = isset( $value['connection_type'] )
 			? sanitize_key( (string) $value['connection_type'] )
@@ -258,8 +312,13 @@ class OllamaSettings {
 			}
 		}
 
-		$thinking = isset( $value['thinking'] ) ? sanitize_key( (string) $value['thinking'] ) : self::THINKING_DEFAULT;
-		if ( ! in_array( $thinking, array( self::THINKING_DEFAULT, self::THINKING_ENABLED, self::THINKING_DISABLED ), true ) ) {
+		$thinking = isset( $value['thinking'] )
+			? sanitize_key( (string) $value['thinking'] )
+			: ( isset( $existing['thinking'] ) ? sanitize_key( (string) $existing['thinking'] ) : self::THINKING_DEFAULT );
+		if ( self::THINKING_ENABLED === $thinking ) {
+			$thinking = self::THINKING_MEDIUM;
+		}
+		if ( ! in_array( $thinking, array( self::THINKING_DEFAULT, self::THINKING_DISABLED, self::THINKING_LOW, self::THINKING_MEDIUM, self::THINKING_HIGH ), true ) ) {
 			$thinking = self::THINKING_DEFAULT;
 		}
 
@@ -276,16 +335,45 @@ class OllamaSettings {
 			}
 		}
 
+		$embedding_request_timeout = isset( $value['embedding_request_timeout'] )
+			? trim( (string) $value['embedding_request_timeout'] )
+			: ( isset( $existing['embedding_request_timeout'] ) ? trim( (string) $existing['embedding_request_timeout'] ) : '' );
+		if ( '' !== $embedding_request_timeout ) {
+			$embedding_request_timeout = (string) absint( $embedding_request_timeout );
+			if ( '' === $embedding_request_timeout || (int) $embedding_request_timeout < 5 || (int) $embedding_request_timeout > 1800 ) {
+				add_settings_error(
+					self::OPTION_NAME,
+					'zctz_ollama_ai_connector_invalid_embedding_request_timeout',
+					__( 'Use an embedding request timeout between 5 and 1800 seconds.', 'zactonz-ai-provider-ollama' )
+				);
+				$embedding_request_timeout = '';
+			}
+		}
+
 		$this->save_api_keys( $value, $connection_type );
 
-		return array(
-			'connection_type' => $connection_type,
-			'host'            => $host,
-			'port'            => $port,
-			'model'           => isset( $value['model'] ) ? sanitize_text_field( (string) $value['model'] ) : '',
-			'thinking'        => $thinking,
-			'request_timeout' => $request_timeout,
+		$sanitized = array(
+			'connection_type'           => $connection_type,
+			'host'                      => $host,
+			'port'                      => $port,
+			'thinking'                  => $thinking,
+			'request_timeout'           => $request_timeout,
+			'embedding_request_timeout' => $embedding_request_timeout,
 		);
+
+		foreach ( array( 'text', 'vision', 'image', 'embedding', 'tools' ) as $capability ) {
+			$key               = 'model_' . $capability;
+			$sanitized[ $key ] = isset( $value[ $key ] )
+				? sanitize_text_field( (string) $value[ $key ] )
+				: ( isset( $existing[ $key ] ) ? sanitize_text_field( (string) $existing[ $key ] ) : '' );
+		}
+		if ( '' === $sanitized['model_text'] && ! isset( $value['model_text'] ) && isset( $existing['model'] ) ) {
+			$sanitized['model_text'] = sanitize_text_field( (string) $existing['model'] );
+		}
+		// Keep the legacy key synchronized for integrations that still read it.
+		$sanitized['model'] = $sanitized['model_text'];
+
+		return $sanitized;
 	}
 
 	/**
@@ -527,14 +615,30 @@ class OllamaSettings {
 	 * @since 1.0.0
 	 */
 	public function render_preferred_model_field(): void {
-		$settings = self::get_settings();
-		$value    = isset( $settings['model'] ) ? $settings['model'] : '';
+		$this->render_capability_model_field( array( 'capability' => 'text' ) );
+	}
+
+	/**
+	 * Renders a capability-specific default model selector.
+	 *
+	 * @since 1.1.0
+	 *
+	 * @param array<string, string> $args Field arguments.
+	 */
+	public function render_capability_model_field( array $args ): void {
+		$capability = isset( $args['capability'] ) && in_array( $args['capability'], array( 'text', 'vision', 'image', 'embedding', 'tools' ), true )
+			? $args['capability']
+			: 'text';
+		$settings   = self::get_settings();
+		$key        = 'model_' . $capability;
+		$value      = isset( $settings[ $key ] ) ? (string) $settings[ $key ] : ( 'text' === $capability && isset( $settings['model'] ) ? (string) $settings['model'] : '' );
 		?>
 
 		<select
-			id="<?php echo esc_attr( self::OPTION_NAME . '-preferred-model' ); ?>"
-			name="<?php echo esc_attr( self::OPTION_NAME . '[model]' ); ?>"
+			id="<?php echo esc_attr( self::OPTION_NAME . '-model-' . $capability ); ?>"
+			name="<?php echo esc_attr( self::OPTION_NAME . '[' . $key . ']' ); ?>"
 			class="zactonz-ai-provider-ollama-model-select"
+			data-capability="<?php echo esc_attr( $capability ); ?>"
 			data-selected="<?php echo esc_attr( $value ); ?>"
 		>
 			<option value=""><?php echo esc_html__( 'Automatic', 'zactonz-ai-provider-ollama' ); ?></option>
@@ -543,7 +647,7 @@ class OllamaSettings {
 			<?php endif; ?>
 		</select>
 		<p class="description">
-			<?php echo esc_html__( 'Models load from the configured Ollama instance. This model is placed first in WordPress AI model preference lists.', 'zactonz-ai-provider-ollama' ); ?>
+			<?php echo esc_html__( 'Only compatible models are offered. Automatic lets the WordPress AI Client choose the first available compatible model.', 'zactonz-ai-provider-ollama' ); ?>
 		</p>
 
 		<?php
@@ -568,12 +672,18 @@ class OllamaSettings {
 			<option value="<?php echo esc_attr( self::THINKING_DISABLED ); ?>" <?php selected( self::THINKING_DISABLED, $thinking ); ?>>
 				<?php echo esc_html__( 'No thinking', 'zactonz-ai-provider-ollama' ); ?>
 			</option>
-			<option value="<?php echo esc_attr( self::THINKING_ENABLED ); ?>" <?php selected( self::THINKING_ENABLED, $thinking ); ?>>
-				<?php echo esc_html__( 'Think', 'zactonz-ai-provider-ollama' ); ?>
+			<option value="<?php echo esc_attr( self::THINKING_LOW ); ?>" <?php selected( self::THINKING_LOW, $thinking ); ?>>
+				<?php echo esc_html__( 'Low', 'zactonz-ai-provider-ollama' ); ?>
+			</option>
+			<option value="<?php echo esc_attr( self::THINKING_MEDIUM ); ?>" <?php selected( self::THINKING_MEDIUM, $thinking ); ?>>
+				<?php echo esc_html__( 'Medium', 'zactonz-ai-provider-ollama' ); ?>
+			</option>
+			<option value="<?php echo esc_attr( self::THINKING_HIGH ); ?>" <?php selected( self::THINKING_HIGH, $thinking ); ?>>
+				<?php echo esc_html__( 'High', 'zactonz-ai-provider-ollama' ); ?>
 			</option>
 		</select>
 		<p class="description">
-			<?php echo esc_html__( 'Applies to the default Ollama model when it reports thinking support. No thinking can reduce local response time for supported models.', 'zactonz-ai-provider-ollama' ); ?>
+			<?php echo esc_html__( 'Applies to the default text model when it reports thinking support. Some models, including GPT-OSS, do not support disabling thinking.', 'zactonz-ai-provider-ollama' ); ?>
 		</p>
 		<p class="description" id="<?php echo esc_attr( self::OPTION_NAME . '-thinking-support' ); ?>"></p>
 
@@ -607,6 +717,48 @@ class OllamaSettings {
 			<?php echo esc_html__( 'Thinking models and slow local hardware may need longer than the old 60-second request window. Per-request ollama.request_timeout custom options still override this value.', 'zactonz-ai-provider-ollama' ); ?>
 		</p>
 
+		<?php
+	}
+
+	/**
+	 * Renders the embedding request timeout field.
+	 *
+	 * @since 1.1.0
+	 */
+	public function render_embedding_request_timeout_field(): void {
+		$settings = self::get_settings();
+		$value    = isset( $settings['embedding_request_timeout'] ) && '' !== $settings['embedding_request_timeout']
+			? $settings['embedding_request_timeout']
+			: '60';
+		?>
+		<input
+			type="number"
+			id="<?php echo esc_attr( self::OPTION_NAME . '-embedding-request-timeout' ); ?>"
+			name="<?php echo esc_attr( self::OPTION_NAME . '[embedding_request_timeout]' ); ?>"
+			value="<?php echo esc_attr( $value ); ?>"
+			class="small-text"
+			min="5"
+			max="1800"
+			step="1"
+		/>
+		<span><?php echo esc_html__( 'seconds', 'zactonz-ai-provider-ollama' ); ?></span>
+		<p class="description"><?php echo esc_html__( 'Used for single and batch embedding requests.', 'zactonz-ai-provider-ollama' ); ?></p>
+		<?php
+	}
+
+	/**
+	 * Renders the on-demand diagnostics panel.
+	 *
+	 * @since 1.1.0
+	 */
+	public function render_diagnostics_field(): void {
+		?>
+		<button type="button" class="button" id="zctz-ollama-run-diagnostics">
+			<?php echo esc_html__( 'Run diagnostics', 'zactonz-ai-provider-ollama' ); ?>
+		</button>
+		<span class="spinner" id="zctz-ollama-diagnostics-spinner"></span>
+		<div id="zctz-ollama-diagnostics-results" aria-live="polite"></div>
+		<p class="description"><?php echo esc_html__( 'Checks the endpoint, latency, installed models, selected defaults, embedding compatibility, and streaming support. API keys are never displayed.', 'zactonz-ai-provider-ollama' ); ?></p>
 		<?php
 	}
 
@@ -677,9 +829,17 @@ class OllamaSettings {
 			),
 			admin_url( 'admin-ajax.php' )
 		);
+		$diagnostics_ajax_url  = add_query_arg(
+			array(
+				'action'   => self::AJAX_DIAGNOSTICS_ACTION,
+				'_wpnonce' => wp_create_nonce( self::NONCE_ACTION ),
+			),
+			admin_url( 'admin-ajax.php' )
+		);
 		$localized_settings    = array(
 			'ajaxUrl'             => esc_url_raw( $models_ajax_url ),
 			'capabilitiesAjaxUrl' => esc_url_raw( $capabilities_ajax_url ),
+			'diagnosticsAjaxUrl'  => esc_url_raw( $diagnostics_ajax_url ),
 			'thinkingStrings'     => array(
 				'checking'    => __( 'Checking thinking support for this model...', 'zactonz-ai-provider-ollama' ),
 				'chooseModel' => __( 'Choose a default model before setting its thinking behavior.', 'zactonz-ai-provider-ollama' ),
@@ -803,7 +963,22 @@ class OllamaSettings {
 			wp_send_json_error( $models->get_error_message(), $models->get_error_code() );
 		}
 
-		wp_send_json_success( $models );
+		$descriptors = array();
+		$registry    = AiClient::defaultRegistry();
+		$provider    = $registry->getProviderClassName( 'ollama' );
+		$directory   = $provider::modelMetadataDirectory();
+		foreach ( $models as $model ) {
+			$model_data = method_exists( $model, 'toArray' ) ? $model->toArray() : array();
+			if ( ! isset( $model_data['id'] ) || ! is_string( $model_data['id'] ) ) {
+				continue;
+			}
+			if ( method_exists( $directory, 'getModelDescriptor' ) ) {
+				$model_data = array_merge( $model_data, $directory->getModelDescriptor( $model_data['id'] ) );
+			}
+			$descriptors[] = $model_data;
+		}
+
+		wp_send_json_success( $descriptors );
 	}
 
 	/**
@@ -838,16 +1013,37 @@ class OllamaSettings {
 			$capabilities             = method_exists( $model_metadata_directory, 'getModelCapabilities' )
 				? $model_metadata_directory->getModelCapabilities( $model_name )
 				: array();
+			$descriptor               = method_exists( $model_metadata_directory, 'getModelDescriptor' )
+				? $model_metadata_directory->getModelDescriptor( $model_name )
+				: array();
 
 			wp_send_json_success(
 				array(
-					'thinking'     => in_array( 'thinking', $capabilities, true ),
+					'thinking'     => isset( $descriptor['features']['thinking'] )
+						? (bool) $descriptor['features']['thinking']
+						: in_array( 'thinking', $capabilities, true ),
 					'capabilities' => $capabilities,
+					'features'     => isset( $descriptor['features'] ) ? $descriptor['features'] : array(),
 				)
 			);
 		} catch ( \Throwable $e ) {
 			wp_send_json_error( __( 'Could not check thinking support for this Ollama model.', 'zactonz-ai-provider-ollama' ), 500 );
 		}
+	}
+
+	/**
+	 * Runs redacted connection diagnostics for an administrator.
+	 *
+	 * @since 1.1.0
+	 */
+	public function ajax_diagnostics(): void {
+		check_ajax_referer( self::NONCE_ACTION );
+
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( __( 'Insufficient permissions.', 'zactonz-ai-provider-ollama' ), 403 );
+		}
+
+		wp_send_json_success( ( new OllamaDiagnostics() )->run() );
 	}
 
 	/**
@@ -1115,7 +1311,7 @@ class OllamaSettings {
 	 * @param string $connection_type Connection type.
 	 * @return array<string, string> Request headers.
 	 */
-	private static function get_request_headers_for_connection( string $connection_type ): array {
+	public static function get_request_headers_for_connection( string $connection_type ): array {
 		$headers = array(
 			'Accept' => 'application/json',
 		);
@@ -1137,7 +1333,74 @@ class OllamaSettings {
 	 * @return array<int, array{string, string}> Preferred models with Ollama first.
 	 */
 	public function prepend_default_model_preference( array $models ): array {
-		$model_id = self::get_preferred_model();
+		return $this->prepend_model_preference( $models, self::get_preferred_model( 'text' ) );
+	}
+
+	/**
+	 * Prepends the default text model.
+	 *
+	 * @since 1.1.0
+	 * @param array<int, mixed> $models Existing preferences.
+	 * @return array<int, mixed> Updated preferences.
+	 */
+	public function prepend_default_text_model_preference( array $models ): array {
+		return $this->prepend_model_preference( $models, self::get_preferred_model( 'text' ) );
+	}
+
+	/**
+	 * Prepends the default vision model.
+	 *
+	 * @since 1.1.0
+	 * @param array<int, mixed> $models Existing preferences.
+	 * @return array<int, mixed> Updated preferences.
+	 */
+	public function prepend_default_vision_model_preference( array $models ): array {
+		return $this->prepend_model_preference( $models, self::get_preferred_model( 'vision' ) );
+	}
+
+	/**
+	 * Prepends the default image model.
+	 *
+	 * @since 1.1.0
+	 * @param array<int, mixed> $models Existing preferences.
+	 * @return array<int, mixed> Updated preferences.
+	 */
+	public function prepend_default_image_model_preference( array $models ): array {
+		return $this->prepend_model_preference( $models, self::get_preferred_model( 'image' ) );
+	}
+
+	/**
+	 * Prepends the default embedding model.
+	 *
+	 * @since 1.1.0
+	 * @param array<int, mixed> $models Existing preferences.
+	 * @return array<int, mixed> Updated preferences.
+	 */
+	public function prepend_default_embedding_model_preference( array $models ): array {
+		return $this->prepend_model_preference( $models, self::get_preferred_model( 'embedding' ) );
+	}
+
+	/**
+	 * Prepends the default tool-calling model.
+	 *
+	 * @since 1.1.0
+	 * @param array<int, mixed> $models Existing preferences.
+	 * @return array<int, mixed> Updated preferences.
+	 */
+	public function prepend_default_tools_model_preference( array $models ): array {
+		return $this->prepend_model_preference( $models, self::get_preferred_model( 'tools' ) );
+	}
+
+	/**
+	 * Prepends one Ollama model without adding duplicates.
+	 *
+	 * @since 1.1.0
+	 *
+	 * @param array<int, mixed> $models Existing preferences.
+	 * @param string            $model_id Ollama model ID.
+	 * @return array<int, mixed> Updated preferences.
+	 */
+	private function prepend_model_preference( array $models, string $model_id ): array {
 		if ( '' === $model_id ) {
 			return $models;
 		}
@@ -1164,7 +1427,7 @@ class OllamaSettings {
 	 *
 	 * @since 1.1.0
 	 *
-	 * @return \WP_Error|array<string, \WordPress\AiClient\Providers\Models\DTO\ModelMetadata> The models.
+	 * @return \WP_Error|list<\WordPress\AiClient\Providers\Models\DTO\ModelMetadata> The models.
 	 */
 	public function get_models() {
 		if ( ! class_exists( AiClient::class ) ) {
@@ -1475,7 +1738,11 @@ class OllamaSettings {
 		$settings = self::get_settings();
 		$thinking = isset( $settings['thinking'] ) ? $settings['thinking'] : self::THINKING_DEFAULT;
 
-		if ( in_array( $thinking, array( self::THINKING_DEFAULT, self::THINKING_ENABLED, self::THINKING_DISABLED ), true ) ) {
+		if ( self::THINKING_ENABLED === $thinking ) {
+			return self::THINKING_MEDIUM;
+		}
+
+		if ( in_array( $thinking, array( self::THINKING_DEFAULT, self::THINKING_DISABLED, self::THINKING_LOW, self::THINKING_MEDIUM, self::THINKING_HIGH ), true ) ) {
 			return $thinking;
 		}
 
@@ -1487,11 +1754,33 @@ class OllamaSettings {
 	 *
 	 * @since 1.0.0
 	 *
+	 * @param string $capability Task capability.
 	 * @return string Preferred Ollama model ID.
 	 */
-	public static function get_preferred_model(): string {
+	public static function get_preferred_model( string $capability = 'text' ): string {
 		$settings = self::get_settings();
-		return isset( $settings['model'] ) ? (string) $settings['model'] : '';
+		$key      = 'model_' . $capability;
+		if ( isset( $settings[ $key ] ) ) {
+			return (string) $settings[ $key ];
+		}
+
+		return 'text' === $capability && isset( $settings['model'] ) ? (string) $settings['model'] : '';
+	}
+
+	/**
+	 * Gets all task-specific model defaults.
+	 *
+	 * @since 1.1.0
+	 *
+	 * @return array<string, string> Defaults keyed by task.
+	 */
+	public static function get_preferred_models(): array {
+		$models = array();
+		foreach ( array( 'text', 'vision', 'image', 'embedding', 'tools' ) as $capability ) {
+			$models[ $capability ] = self::get_preferred_model( $capability );
+		}
+
+		return $models;
 	}
 
 	/**
@@ -1514,6 +1803,25 @@ class OllamaSettings {
 	}
 
 	/**
+	 * Gets the configured embedding request timeout.
+	 *
+	 * @since 1.1.0
+	 *
+	 * @return float Timeout in seconds.
+	 */
+	public static function get_embedding_request_timeout(): float {
+		$settings = self::get_settings();
+		if ( isset( $settings['embedding_request_timeout'] ) && is_numeric( $settings['embedding_request_timeout'] ) ) {
+			$timeout = (float) $settings['embedding_request_timeout'];
+			if ( $timeout >= 5.0 && $timeout <= 1800.0 ) {
+				return $timeout;
+			}
+		}
+
+		return 60.0;
+	}
+
+	/**
 	 * Gets the configured thinking behavior for a preferred model request.
 	 *
 	 * @since 1.0.0
@@ -1522,7 +1830,7 @@ class OllamaSettings {
 	 * @return string Thinking behavior for this request.
 	 */
 	public static function get_thinking_mode_for_model( string $model_id ): string {
-		$preferred_model = self::get_preferred_model();
+		$preferred_model = self::get_preferred_model( 'text' );
 		if ( '' === $preferred_model || $preferred_model !== $model_id ) {
 			return self::THINKING_DEFAULT;
 		}

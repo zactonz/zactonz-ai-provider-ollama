@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name:       Zactonz AI Connector: Ollama
- * Plugin URI:        https://developers.zactonz.com/wp/plugins/zactonz-ai-provider-ollama/
+ * Plugin URI:        https://github.com/zactonz/zactonz-ai-provider-ollama
  * Description:       Adds an Ollama connector to Settings > Connectors for the WordPress AI Client, local Ollama, self-hosted Ollama, and Ollama Cloud.
  * Requires at least: 7.0
  * Requires PHP:      7.4

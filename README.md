@@ -1,5 +1,10 @@
 # Zactonz AI Connector: Ollama
 
+[![WordPress plugin](https://img.shields.io/badge/WordPress.org-Zactonz%20AI%20Connector%3A%20Ollama-blue?logo=wordpress)](https://wordpress.org/plugins/zactonz-ai-provider-ollama/)
+[![Latest release](https://img.shields.io/github/v/release/zactonz/zactonz-ai-provider-ollama?include_prereleases&label=release)](https://github.com/zactonz/zactonz-ai-provider-ollama/releases)
+[![License: GPL v2 or later](https://img.shields.io/badge/license-GPL--2.0--or--later-blue.svg)](LICENSE)
+[![PHP 7.4+](https://img.shields.io/badge/PHP-7.4%2B-777bb4?logo=php)](composer.json)
+
 Adds an Ollama connector to **Settings > Connectors** for the WordPress AI Client, local Ollama, self-hosted Ollama, and Ollama Cloud.
 
 Disclaimer: Zactonz AI Connector: Ollama is developed by Zactonz Technologies. Ollama is a third-party project. This plugin is not affiliated with, endorsed by, or sponsored by Ollama.
@@ -7,6 +12,8 @@ Disclaimer: Zactonz AI Connector: Ollama is developed by Zactonz Technologies. O
 Version: v1.1.0
 
 Developer: [Zactonz Technologies](https://zactonz.com/)
+
+Links: [WordPress.org plugin](https://wordpress.org/plugins/zactonz-ai-provider-ollama/) | [GitHub releases](https://github.com/zactonz/zactonz-ai-provider-ollama/releases) | [Support forum](https://wordpress.org/support/plugin/zactonz-ai-provider-ollama/)
 
 ## Features
 
@@ -100,3 +107,39 @@ $result = $model->generateOllamaStreamResult(
 ```
 
 Streaming requires the PHP cURL extension. The diagnostics panel reports whether the server is ready.
+
+## Development
+
+Install development dependencies with Composer:
+
+```bash
+composer install
+```
+
+Run the full local quality suite:
+
+```bash
+composer lint
+```
+
+Individual checks are also available:
+
+```bash
+composer test
+composer phpcs
+composer phpstan
+```
+
+The WordPress.org distribution excludes development tooling through `.distignore`.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for release history.
+
+## Security
+
+Please report security issues privately. See [SECURITY.md](SECURITY.md).
+
+## License
+
+Zactonz AI Connector: Ollama is licensed under GPL-2.0-or-later. See [LICENSE](LICENSE).

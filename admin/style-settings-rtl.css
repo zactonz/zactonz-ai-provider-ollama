@@ -41,3 +41,29 @@
 	background-color: #ede9fe;
 	color: #4c1d95;
 }
+
+#zctz-ollama-diagnostics-spinner {
+	float: none;
+	margin: 4px 6px 0 0;
+}
+
+#zctz-ollama-diagnostics-results.notice {
+	margin: 12px 0 0;
+	padding: 8px 12px;
+}
+
+#zctz-ollama-diagnostics-results table {
+	border-collapse: collapse;
+	width: 100%;
+}
+
+#zctz-ollama-diagnostics-results th,
+#zctz-ollama-diagnostics-results td {
+	padding: 5px 0 5px 8px;
+	text-align: right;
+	vertical-align: top;
+}
+
+#zctz-ollama-diagnostics-results th {
+	width: 11rem;
+}

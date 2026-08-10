@@ -1,0 +1,20 @@
+{
+  "$schema": "https://playground.wordpress.net/blueprint-schema.json",
+  "landingPage": "/wp-admin/options-general.php?page=zactonz-ai-provider-ollama",
+  "login": true,
+  "steps": [
+    {
+      "step": "defineWpConfigConsts",
+      "consts": {
+        "WP_DEBUG": true,
+        "WP_DEBUG_DISPLAY": true,
+        "WP_DISABLE_FATAL_ERROR_HANDLER": true
+      }
+    },
+    {
+      "step": "activatePlugin",
+      "pluginName": "Zactonz AI Connector: Ollama",
+      "pluginPath": "/wordpress/wp-content/plugins/zactonz-ai-provider-ollama/igniter.php"
+    }
+  ]
+}

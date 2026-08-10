@@ -10,6 +10,7 @@ declare( strict_types=1 );
 namespace Zactonz\AiProviderForOllama\Provider;
 
 use Zactonz\AiProviderForOllama\Metadata\OllamaModelMetadataDirectory;
+use Zactonz\AiProviderForOllama\Models\OllamaEmbeddingGenerationModel;
 use Zactonz\AiProviderForOllama\Models\OllamaImageGenerationModel;
 use Zactonz\AiProviderForOllama\Models\OllamaTextGenerationModel;
 use Zactonz\AiProviderForOllama\Settings\OllamaSettings;
@@ -61,6 +62,10 @@ class OllamaProvider extends AbstractApiProvider {
 	): ModelInterface {
 
 		$capabilities_string_list = $model_metadata->toArray()[ ModelMetadata::KEY_SUPPORTED_CAPABILITIES ];
+
+		if ( in_array( 'embedding_generation', $capabilities_string_list, true ) ) {
+			return new OllamaEmbeddingGenerationModel( $model_metadata, $provider_metadata );
+		}
 
 		if ( in_array( 'image_generation', $capabilities_string_list, true ) ) {
 			return new OllamaImageGenerationModel( $model_metadata, $provider_metadata );

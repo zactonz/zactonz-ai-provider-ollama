@@ -1,0 +1,17 @@
+{
+  "$schema": "https://playground.wordpress.net/blueprint-schema.json",
+  "landingPage": "/wp-admin/tools.php?page=plugin-check",
+  "login": true,
+  "steps": [
+    {
+      "step": "activatePlugin",
+      "pluginName": "Plugin Check",
+      "pluginPath": "/wordpress/wp-content/plugins/plugin-check/plugin.php"
+    },
+    {
+      "step": "activatePlugin",
+      "pluginName": "Zactonz AI Connector: Ollama",
+      "pluginPath": "/wordpress/wp-content/plugins/zactonz-ai-provider-ollama/igniter.php"
+    }
+  ]
+}

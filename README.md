@@ -1,10 +1,10 @@
 # Zactonz AI Connector: Ollama
 
-An Ollama AI connector plugin for the WordPress AI Client and its underlying PHP AI Client SDK.
+Adds an Ollama connector to **Settings > Connectors** for the WordPress AI Client, local Ollama, self-hosted Ollama, and Ollama Cloud.
 
 Disclaimer: Zactonz AI Connector: Ollama is developed by Zactonz Technologies. Ollama is a third-party project. This plugin is not affiliated with, endorsed by, or sponsored by Ollama.
 
-Version: v1.0.0
+Version: v1.1.0
 
 Developer: [Zactonz Technologies](https://zactonz.com/)
 
@@ -12,6 +12,7 @@ Developer: [Zactonz Technologies](https://zactonz.com/)
 
 - Registers Ollama with the WordPress AI Client
 - Registers Ollama on **Settings > Connectors** with its provider logo and live connection status
+- Uses connector-focused WordPress.org metadata so admins can find it from the plugin directory connector search
 - Adds an Ollama Cloud or self-hosted connection switch on the Connector screen
 - Configures a self-hosted Ollama URL or IP address and port in WordPress admin
 - Stores Cloud and self-hosted API keys separately and applies the active key to Ollama requests
@@ -21,6 +22,12 @@ Developer: [Zactonz Technologies](https://zactonz.com/)
 - Provides an admin text request timeout for slower local or thinking requests
 - Supports optional credentials plus the `OLLAMA_API_KEY` environment variable or PHP constant
 - Uses Ollama model discovery plus its OpenAI-compatible API for chat text generation
+- Adds single and batch embedding generation through Ollama's native `/api/embed` endpoint on WordPress 7.1+
+- Detects model capabilities accurately, including text, vision, tools, thinking, images, and embeddings
+- Provides separate default models for text, vision, image generation, embeddings, and tool calling
+- Supports default, disabled, low, medium, and high thinking levels when the selected text model supports thinking
+- Adds redacted connection diagnostics and a WordPress Site Health test
+- Provides stable, cancellable SSE streaming with separate content, thinking, and tool-call events
 
 ## Installation
 
@@ -56,3 +63,40 @@ $text = wp_ai_client_prompt( 'Write a short WordPress release note.' )
 The default model picker moves the selected model to the front of Ollama model discovery and prepends it to WordPress AI model preference lists. Callers can still request a specific Ollama model by model ID when needed.
 
 For the default model, the thinking control uses Ollama's OpenAI-compatible reasoning field. **No thinking** asks supported models to skip reasoning and can shorten local responses. Models that do not report thinking support keep their normal behavior.
+
+### Embeddings
+
+WordPress 7.1 and PHP AI Client 1.4 add the embedding-generation contract used by this connector. Single and batch inputs are supported:
+
+```php
+use WordPress\AiClient\AiClient;
+
+$embeddings = AiClient::input( array( 'First document', 'Second document' ) )
+	->usingProvider( 'ollama' )
+	->generateEmbeddings();
+```
+
+On WordPress 7.0 the plugin remains fully load-safe and continues to provide its text and image capabilities; embedding-only models become available automatically after upgrading to WordPress 7.1.
+
+### Streaming
+
+Until the PHP AI Client publishes a provider-neutral streaming interface, the Ollama text model exposes a stable provider extension named `generateOllamaStreamResult()`. Each callback event has a `type` of `content_delta`, `thinking_delta`, `tool_call_delta`, or `done`. Return `false` to cancel and receive the partial result.
+
+```php
+use WordPress\AiClient\Messages\DTO\MessagePart;
+use WordPress\AiClient\Messages\DTO\UserMessage;
+use Zactonz\AiProviderForOllama\Provider\OllamaProvider;
+
+$model  = OllamaProvider::model( 'qwen3' );
+$result = $model->generateOllamaStreamResult(
+	array( new UserMessage( array( new MessagePart( 'Write a release note.' ) ) ) ),
+	static function ( array $event ) {
+		if ( 'content_delta' === $event['type'] ) {
+			echo esc_html( $event['delta'] );
+			flush();
+		}
+	}
+);
+```
+
+Streaming requires the PHP cURL extension. The diagnostics panel reports whether the server is ready.

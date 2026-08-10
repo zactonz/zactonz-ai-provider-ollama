@@ -1,0 +1,39 @@
+{
+  "name": "zactonz/zactonz-ai-provider-ollama",
+  "description": "Ollama Cloud and self-hosted connector for the WordPress AI Client.",
+  "type": "wordpress-plugin",
+  "license": "GPL-2.0-or-later",
+  "require": {
+    "php": ">=7.4"
+  },
+  "require-dev": {
+    "phpcompatibility/phpcompatibility-wp": "^2.1",
+    "phpstan/phpstan": "^2.1",
+    "phpunit/phpunit": "^9.6",
+    "squizlabs/php_codesniffer": "^3.13",
+    "szepeviktor/phpstan-wordpress": "^2.0",
+    "wp-coding-standards/wpcs": "^3.2",
+    "wordpress/php-ai-client": "^1.4"
+  },
+  "config": {
+    "allow-plugins": {
+      "dealerdirect/phpcodesniffer-composer-installer": true,
+      "php-http/discovery": true
+    },
+    "platform": {
+      "php": "7.4"
+    },
+    "sort-packages": true
+  },
+  "scripts": {
+    "lint": [
+      "@phpcs",
+      "@phpstan",
+      "@test"
+    ],
+    "phpcbf": "phpcbf",
+    "phpcs": "phpcs",
+    "phpstan": "phpstan analyse --memory-limit=1G --debug",
+    "test": "phpunit"
+  }
+}

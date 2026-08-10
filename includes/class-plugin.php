@@ -13,6 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
+use Zactonz\AiProviderForOllama\Diagnostics\OllamaSiteHealth;
 use Zactonz\AiProviderForOllama\Provider\OllamaProvider;
 use Zactonz\AiProviderForOllama\Settings\OllamaSettings;
 use WordPress\AiClient\AiClient;
@@ -37,6 +38,8 @@ class Plugin {
 		add_filter( 'plugin_action_links_' . plugin_basename( ZCTZ_OLLAMA_AI_CONNECTOR_PLUGIN_FILE ), array( $this, 'plugin_action_links' ) );
 		add_filter( 'http_request_host_is_external', array( $this, 'allow_localhost_requests' ), 10, 3 );
 		add_filter( 'http_allowed_safe_ports', array( $this, 'allow_ollama_ports' ) );
+
+		( new OllamaSiteHealth() )->init();
 	}
 
 	/**

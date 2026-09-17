@@ -20,6 +20,8 @@ It lets WordPress sites use large language models running locally, on a remote s
 
 **Disclaimer:** Zactonz AI Connector: Ollama is developed by Zactonz Technologies. Ollama is a third-party project. This plugin is not affiliated with, endorsed by, or sponsored by Ollama.
 
+Source code, issues and release history are on [GitHub](https://github.com/zactonz/zactonz-ai-provider-ollama). Setup and usage docs are on the [Zactonz developer portal](https://developers.zactonz.com/wordpress/plugins/zactonz-ai-provider-ollama/).
+
 Ollama exposes an [OpenAI-compatible API](https://ollama.com/blog/openai-compatibility), and this connector uses that API to communicate with any model you have pulled into Ollama (Llama, Mistral, Gemma, Phi, and many more).
 
 **Features:**

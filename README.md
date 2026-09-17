@@ -13,7 +13,7 @@ Version: v1.1.0
 
 Developer: [Zactonz Technologies](https://zactonz.com/)
 
-Links: [WordPress.org plugin](https://wordpress.org/plugins/zactonz-ai-provider-ollama/) | [GitHub releases](https://github.com/zactonz/zactonz-ai-provider-ollama/releases) | [Support forum](https://wordpress.org/support/plugin/zactonz-ai-provider-ollama/)
+Links: [Documentation](https://developers.zactonz.com/wordpress/plugins/zactonz-ai-provider-ollama/) | [WordPress.org plugin](https://wordpress.org/plugins/zactonz-ai-provider-ollama/) | [GitHub releases](https://github.com/zactonz/zactonz-ai-provider-ollama/releases) | [Support forum](https://wordpress.org/support/plugin/zactonz-ai-provider-ollama/)
 
 ## Features
 

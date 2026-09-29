@@ -9,6 +9,10 @@ declare( strict_types=1 );
 
 namespace Zactonz\AiProviderForOllama\Models;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 use Zactonz\AiProviderForOllama\Models\Traits\OllamaRequestOptionsTrait;
 use Zactonz\AiProviderForOllama\Provider\OllamaProvider;
 use Zactonz\AiProviderForOllama\Settings\OllamaSettings;
@@ -118,8 +122,11 @@ class OllamaTextGenerationModel extends AbstractOpenAiCompatibleTextGenerationMo
 	 * This provider extension is intentionally Ollama-specific until the PHP AI
 	 * Client publishes a stable streaming contract. The callback receives arrays
 	 * with a `type` of content_delta, thinking_delta, tool_call_delta, or done.
-	 * Returning false from the callback cancels the transfer and returns the
-	 * partial result with `cancelled` in its additional provider data.
+	 * Returning false stops delivering events and returns the partial result with
+	 * `cancelled` in its additional provider data. The HTTP request itself still
+	 * runs to completion: nothing in the HTTP API can abort a response mid-body,
+	 * and PHP defers an exception thrown from a transport callback until the
+	 * transfer has finished anyway.
 	 *
 	 * @since 1.1.0
 	 *
@@ -130,19 +137,26 @@ class OllamaTextGenerationModel extends AbstractOpenAiCompatibleTextGenerationMo
 	 * @throws ResponseException When Ollama returns an unsuccessful response.
 	 */
 	public function generateOllamaStreamResult( array $prompt, callable $on_event ): GenerativeAiResult {
-		if ( ! function_exists( 'curl_init' ) ) {
-			throw new RuntimeException( 'The PHP cURL extension is required for Ollama streaming.' );
-		}
-
 		$params = $this->prepareGenerateTextParams( $prompt );
 		unset( $params['ollama.request_timeout'], $params['ollama.connect_timeout'] );
 		$params           = $this->applyPreferredModelThinkingMode( $params );
 		$params['stream'] = true;
 
+		/*
+		 * An OpenAI-compatible stream omits the usage block unless it is asked for,
+		 * so without this the aggregated result reports no tokens at all.
+		 */
+		if ( ! isset( $params['stream_options'] ) ) {
+			$params['stream_options'] = array( 'include_usage' => true );
+		}
+
 		$url     = OllamaProvider::url( '/v1/chat/completions' );
-		$headers = array( 'Content-Type: application/json', 'Accept: text/event-stream' );
+		$headers = array(
+			'Content-Type' => 'application/json',
+			'Accept'       => 'text/event-stream',
+		);
 		foreach ( OllamaSettings::get_request_headers_for_connection( OllamaSettings::get_connection_type() ) as $name => $value ) {
-			$headers[] = $name . ': ' . $value;
+			$headers[ $name ] = $value;
 		}
 
 		$content          = '';
@@ -153,7 +167,8 @@ class OllamaTextGenerationModel extends AbstractOpenAiCompatibleTextGenerationMo
 		$tool_calls       = array();
 		$buffer           = '';
 		$raw_body         = '';
-		$status_code      = 0;
+		$streamed         = false;
+		$halted           = false;
 		$cancelled        = false;
 		$callback_error   = null;
 		$process_sse_data = function ( string $data ) use ( &$content, &$thinking, &$finish_reason, &$id, &$usage, &$tool_calls, &$cancelled, &$callback_error, $on_event ): bool {
@@ -245,80 +260,118 @@ class OllamaTextGenerationModel extends AbstractOpenAiCompatibleTextGenerationMo
 			return true;
 		};
 
-		// phpcs:ignore WordPress.WP.AlternativeFunctions.curl_curl_init -- WordPress HTTP does not expose chunk callbacks.
-		$curl = curl_init( $url );
-		if ( false === $curl ) {
-			throw new RuntimeException( 'Could not initialize cURL for Ollama streaming.' );
-		}
+		$consume = function ( string $chunk ) use ( &$buffer, &$raw_body, &$cancelled, &$callback_error, $process_sse_data ): bool {
+			$raw_body .= $chunk;
+			$buffer   .= str_replace( "\r\n", "\n", $chunk );
 
-		// phpcs:ignore WordPress.WP.AlternativeFunctions.curl_curl_setopt_array -- Required for true incremental streaming.
-		curl_setopt_array(
-			$curl,
-			array(
-				CURLOPT_CONNECTTIMEOUT => 10,
-				CURLOPT_FOLLOWLOCATION => false,
-				CURLOPT_HTTPHEADER     => $headers,
-				CURLOPT_POST           => true,
-				CURLOPT_POSTFIELDS     => wp_json_encode( $params ),
-				CURLOPT_TIMEOUT        => (int) ceil( OllamaSettings::get_text_request_timeout() ),
-				CURLOPT_WRITEFUNCTION  => function ( $handle, string $chunk ) use ( &$buffer, &$raw_body, &$cancelled, &$callback_error, $process_sse_data ): int {
-					unset( $handle );
-					$raw_body .= $chunk;
-					$buffer .= str_replace( "\r\n", "\n", $chunk );
-					while ( true ) {
-						$separator = strpos( $buffer, "\n\n" );
-						if ( false === $separator ) {
-							break;
-						}
-						$block  = substr( $buffer, 0, $separator );
-						$buffer = substr( $buffer, $separator + 2 );
-						$data   = array();
-						foreach ( explode( "\n", $block ) as $line ) {
-							if ( 0 === strpos( $line, 'data:' ) ) {
-								$data[] = ltrim( substr( $line, 5 ) );
-							}
-						}
-						if ( ! empty( $data ) && ! $process_sse_data( implode( "\n", $data ) ) ) {
-							return 0;
-						}
+			while ( true ) {
+				$separator = strpos( $buffer, "\n\n" );
+				if ( false === $separator ) {
+					break;
+				}
+
+				$block  = substr( $buffer, 0, $separator );
+				$buffer = substr( $buffer, $separator + 2 );
+				$data   = array();
+
+				foreach ( explode( "\n", $block ) as $line ) {
+					if ( 0 === strpos( $line, 'data:' ) ) {
+						$data[] = ltrim( substr( $line, 5 ) );
 					}
-					return ( $cancelled || null !== $callback_error ) ? 0 : strlen( $chunk );
-				},
-				CURLOPT_HEADERFUNCTION => function ( $handle, string $header ) use ( &$status_code ): int {
-					unset( $handle );
-					if ( preg_match( '#^HTTP/\S+\s+(\d{3})#', $header, $matches ) ) {
-						$status_code = (int) $matches[1];
-					}
-					return strlen( $header );
-				},
-			)
-		);
+				}
 
-		// phpcs:ignore WordPress.WP.AlternativeFunctions.curl_curl_exec -- WordPress HTTP buffers responses and cannot stream chunks.
-		$success = curl_exec( $curl );
-		// phpcs:ignore WordPress.WP.AlternativeFunctions.curl_curl_error -- Paired with the streaming cURL request above.
-		$curl_error = curl_error( $curl );
+				if ( ! empty( $data ) && ! $process_sse_data( implode( "\n", $data ) ) ) {
+					return false;
+				}
+			}
 
-		if ( $callback_error instanceof \Throwable ) {
-			// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception text is not rendered directly.
-			throw new RuntimeException( 'The Ollama stream callback failed: ' . $callback_error->getMessage(), 0, $callback_error );
+			return ! $cancelled && null === $callback_error;
+		};
+
+		/*
+		 * WordPress forwards every Requests hook to an action named requests-<hook>,
+		 * and both bundled transports dispatch request.progress with each block of
+		 * the body as it arrives. So the request stays an ordinary wp_remote_post()
+		 * and the chunks come back through a WordPress action, with no transport
+		 * code of our own.
+		 */
+		$progress = function ( $chunk ) use ( $consume, &$streamed, &$halted ): void {
+			$streamed = true;
+
+			if ( ! $consume( (string) $chunk ) ) {
+				$halted = true;
+
+				throw new OllamaStreamCancellation();
+			}
+		};
+
+		add_action( 'requests-request.progress', $progress, 10, 1 );
+
+		try {
+			$response = wp_remote_post(
+				$url,
+				array(
+					'headers'     => $headers,
+					'body'        => wp_json_encode( $params ),
+					'timeout'     => (int) ceil( OllamaSettings::get_text_request_timeout() ),
+					'redirection' => 0,
+					'httpversion' => '1.1',
+				)
+			);
+		} catch ( OllamaStreamCancellation $cancellation ) {
+			$response = null;
+		} finally {
+			remove_action( 'requests-request.progress', $progress, 10 );
 		}
-		if ( false === $success && ! $cancelled ) {
-			// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception text is not rendered directly.
-			throw new RuntimeException( 'Ollama streaming request failed: ' . $curl_error );
+
+		if ( null === $response ) {
+			$status_code = 200;
+		} elseif ( is_wp_error( $response ) ) {
+			if ( ! $cancelled ) {
+				// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception text is not rendered directly.
+				throw new RuntimeException( 'Ollama streaming request failed: ' . $response->get_error_message() );
+			}
+
+			$status_code = 200;
+		} else {
+			$status_code = (int) wp_remote_retrieve_response_code( $response );
+
+			if ( ! $streamed ) {
+				/*
+				 * No incremental delivery, so the response arrived in one piece. Replay
+				 * it through the same parser and the caller still sees every event.
+				 */
+				$halted = ! $consume( (string) wp_remote_retrieve_body( $response ) );
+			}
 		}
-		if ( $status_code < 200 || $status_code >= 300 ) {
+
+		if ( ! $cancelled && ( $status_code < 200 || $status_code >= 300 ) ) {
 			$message = json_decode( $raw_body, true );
 			$message = is_array( $message ) && isset( $message['error'] ) ? (string) $message['error'] : trim( $raw_body );
 			// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Provider exception data is not output directly.
 			throw ResponseException::fromInvalidData( $this->providerMetadata()->getName(), 'stream', '' !== $message ? $message : 'Unexpected HTTP status ' . $status_code . '.' );
 		}
 
-		if ( '' !== trim( $buffer ) ) {
+		/*
+		 * A stream can end without the blank line that closes its last block, leaving
+		 * one event in the buffer. Parse it, unless the caller has already cancelled or
+		 * its callback has already thrown, so nothing reaches the caller after it asked
+		 * to stop and the partial result stays exactly what it was told about.
+		 */
+		if ( '' !== trim( $buffer ) && ! $halted ) {
 			$data = preg_replace( '/^data:\s*/m', '', trim( $buffer ) );
 			if ( is_string( $data ) ) {
 				$process_sse_data( $data );
 			}
+		}
+
+		/*
+		 * Checked once, here, because the caller's callback runs on every path above:
+		 * during the stream, during a replayed body, and on the trailing block.
+		 */
+		if ( $callback_error instanceof \Throwable ) {
+			// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception text is not rendered directly.
+			throw new RuntimeException( 'The Ollama stream callback failed: ' . $callback_error->getMessage(), 0, $callback_error );
 		}
 
 		ksort( $tool_calls );
@@ -348,14 +401,19 @@ class OllamaTextGenerationModel extends AbstractOpenAiCompatibleTextGenerationMo
 		$result = $this->parseResponseToGenerativeAiResult(
 			new Response( 200, array( 'Content-Type' => 'application/json' ), (string) wp_json_encode( $response_data ) )
 		);
-		$on_event(
-			array(
-				'type'         => 'done',
-				'cancelled'    => $cancelled,
-				'finishReason' => $finish_reason,
-				'usage'        => $usage,
-			)
-		);
+		try {
+			$on_event(
+				array(
+					'type'         => 'done',
+					'cancelled'    => $cancelled,
+					'finishReason' => $finish_reason,
+					'usage'        => $usage,
+				)
+			);
+		} catch ( \Throwable $e ) {
+			// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception text is not rendered directly.
+			throw new RuntimeException( 'The Ollama stream callback failed: ' . $e->getMessage(), 0, $e );
+		}
 
 		return $result;
 	}

@@ -11,3 +11,7 @@
 /vendor
 /.DS_Store
 /.phpunit.result.cache
+/CHANGELOG.md
+/CONTRIBUTING.md
+/SECURITY.md
+/SUPPORT.md

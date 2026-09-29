@@ -9,6 +9,10 @@ declare( strict_types=1 );
 
 namespace Zactonz\AiProviderForOllama\Diagnostics;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 use Zactonz\AiProviderForOllama\Settings\OllamaSettings;
 use WordPress\AiClient\AiClient;
 
@@ -104,7 +108,7 @@ class OllamaDiagnostics {
 			'aiClientVersion' => class_exists( AiClient::class ) ? AiClient::VERSION : '',
 			'embeddingsReady' => defined( 'WordPress\\AiClient\\Providers\\Models\\Enums\\CapabilityEnum::EMBEDDING_GENERATION' )
 				&& interface_exists( 'WordPress\\AiClient\\Providers\\Models\\EmbeddingGeneration\\Contracts\\EmbeddingGenerationModelInterface' ),
-			'streamingReady'  => function_exists( 'curl_init' ),
+			'streamingReady'  => class_exists( 'WP_HTTP_Requests_Hooks' ),
 			'timestamp'       => gmdate( 'c' ),
 		);
 	}

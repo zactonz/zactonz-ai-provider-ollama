@@ -1,4 +1,4 @@
-# Zactonz AI Connector: Ollama
+# Zactonz AI Connector for Ollama
 
 [![WordPress plugin](https://img.shields.io/badge/WordPress.org-Zactonz%20AI%20Connector%3A%20Ollama-blue?logo=wordpress)](https://wordpress.org/plugins/zactonz-ai-provider-ollama/)
 [![Latest release](https://img.shields.io/github/v/release/zactonz/zactonz-ai-provider-ollama?include_prereleases&label=release)](https://github.com/zactonz/zactonz-ai-provider-ollama/releases)
@@ -7,7 +7,7 @@
 
 Adds an Ollama connector to **Settings > Connectors** for the WordPress AI Client, local Ollama, self-hosted Ollama, and Ollama Cloud.
 
-Disclaimer: Zactonz AI Connector: Ollama is developed by Zactonz Technologies. Ollama is a third-party project. This plugin is not affiliated with, endorsed by, or sponsored by Ollama.
+Disclaimer: Zactonz AI Connector for Ollama is developed by Zactonz Technologies. Ollama is a third-party project. This plugin is not affiliated with, endorsed by, or sponsored by Ollama.
 
 Version: v1.1.0
 
@@ -40,7 +40,7 @@ Links: [Documentation](https://developers.zactonz.com/wordpress/plugins/zactonz-
 
 1. Upload the `zactonz-ai-provider-ollama` folder to `/wp-content/plugins/`.
 2. Ensure the WordPress AI Client or PHP AI Client integration is available.
-3. Activate **Zactonz AI Connector: Ollama**.
+3. Activate **Zactonz AI Connector for Ollama**.
 4. Go to **Settings > Connectors**.
 5. Choose **Ollama Cloud** and add a valid Cloud API key, or choose **Self-hosted** and save the Ollama URL or IP address, port, and optional self-hosted API key.
 6. Use **Settings > Ollama** for default-model selection, thinking behavior, timeout, and model discovery details.
@@ -142,4 +142,4 @@ Please report security issues privately. See [SECURITY.md](SECURITY.md).
 
 ## License
 
-Zactonz AI Connector: Ollama is licensed under GPL-2.0-or-later. See [LICENSE](LICENSE).
+Zactonz AI Connector for Ollama is licensed under GPL-2.0-or-later. See [LICENSE](LICENSE).

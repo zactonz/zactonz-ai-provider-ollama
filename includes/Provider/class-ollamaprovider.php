@@ -9,6 +9,10 @@ declare( strict_types=1 );
 
 namespace Zactonz\AiProviderForOllama\Provider;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 use Zactonz\AiProviderForOllama\Metadata\OllamaModelMetadataDirectory;
 use Zactonz\AiProviderForOllama\Models\OllamaEmbeddingGenerationModel;
 use Zactonz\AiProviderForOllama\Models\OllamaImageGenerationModel;

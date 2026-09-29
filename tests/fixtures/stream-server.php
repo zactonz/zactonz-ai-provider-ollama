@@ -14,6 +14,18 @@ if ( isset( $request['model'] ) && 'error-model' === $request['model'] ) {
 	return;
 }
 
+if ( isset( $request['model'] ) && 'unterminated-model' === $request['model'] ) {
+	// A stream whose final block is not closed by a blank line, so it lands in the
+	// trailing buffer the model parses after the transfer.
+	echo 'data: ', json_encode(
+		array( 'id' => 'u', 'choices' => array( array( 'delta' => array( 'content' => 'FIRST ' ) ) ) )
+	), "\n\n";
+	echo 'data: ', json_encode(
+		array( 'id' => 'u', 'choices' => array( array( 'delta' => array( 'content' => 'TRAILING' ), 'finish_reason' => 'stop' ) ) )
+	);
+	return;
+}
+
 if ( isset( $request['model'] ) && 'tool-model' === $request['model'] ) {
 	$chunks = array(
 		array(

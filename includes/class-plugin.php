@@ -27,6 +27,14 @@ use WordPress\AiClient\Providers\Http\DTO\ApiKeyRequestAuthentication;
 class Plugin {
 
 	/**
+	 * Nesting depth of the connector's own outbound requests.
+	 *
+	 * @since 1.2.0
+	 * @var int
+	 */
+	private static $request_depth = 0;
+
+	/**
 	 * Initializes the plugin.
 	 *
 	 * @since 1.0.0
@@ -38,6 +46,7 @@ class Plugin {
 		add_filter( 'plugin_action_links_' . plugin_basename( ZCTZ_OLLAMA_AI_CONNECTOR_PLUGIN_FILE ), array( $this, 'plugin_action_links' ) );
 		add_filter( 'http_request_host_is_external', array( $this, 'allow_localhost_requests' ), 10, 3 );
 		add_filter( 'http_allowed_safe_ports', array( $this, 'allow_ollama_ports' ) );
+		add_filter( 'http_request_args', array( $this, 'note_request_target' ), 10, 2 );
 
 		( new OllamaSiteHealth() )->init();
 	}
@@ -172,10 +181,59 @@ class Plugin {
 		$ollama_host = $this->get_ollama_host();
 		$ollama_port = wp_parse_url( $ollama_host, PHP_URL_PORT );
 
-		if ( ! $ollama_port ) {
+		if ( ! $ollama_port || ! $this->is_ollama_request_in_flight() ) {
 			return $ports;
 		}
 
-		return array_merge( $ports, array( $ollama_port ) );
+		return array_merge( $ports, array( (int) $ollama_port ) );
+	}
+
+	/**
+	 * Reports whether the request being filtered is one of ours.
+	 *
+	 * The safe-port allowlist has no host of its own, so adding Ollama's port
+	 * unconditionally opened it for every request the site makes. The filters below
+	 * mark the connector's own requests, and only those widen the allowlist.
+	 *
+	 * @since 1.2.0
+	 *
+	 * @return bool True while the connector is making a request.
+	 */
+	private function is_ollama_request_in_flight(): bool {
+		return 0 < self::$request_depth;
+	}
+
+	/**
+	 * Marks the connector's own requests while they run.
+	 *
+	 * @since 1.2.0
+	 *
+	 * @param array<string, mixed> $args Request arguments.
+	 * @param string               $url  Request URL.
+	 * @return array<string, mixed> Unchanged request arguments.
+	 */
+	public function note_request_target( $args, $url ): array {
+		$target = wp_parse_url( (string) $url, PHP_URL_HOST );
+		$ours   = wp_parse_url( $this->get_ollama_host(), PHP_URL_HOST );
+
+		if ( is_string( $target ) && is_string( $ours ) && 0 === strcasecmp( $target, $ours ) ) {
+			++self::$request_depth;
+			add_action( 'http_api_debug', array( $this, 'clear_request_target' ), 10, 0 );
+		}
+
+		return is_array( $args ) ? $args : array();
+	}
+
+	/**
+	 * Clears the marker once the request has finished.
+	 *
+	 * @since 1.2.0
+	 */
+	public function clear_request_target(): void {
+		if ( 0 < self::$request_depth ) {
+			--self::$request_depth;
+		}
+
+		remove_action( 'http_api_debug', array( $this, 'clear_request_target' ), 10 );
 	}
 }

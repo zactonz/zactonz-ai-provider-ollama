@@ -45,4 +45,21 @@ class DiagnosticsTest extends TestCase {
 		$this->assertSame( 'good', $result['status'] );
 		$this->assertSame( 'zctz_ollama_connection', $result['test'] );
 	}
+
+	public function test_the_site_health_connection_test_is_asynchronous(): void {
+		$tests = ( new OllamaSiteHealth() )->register_tests( array() );
+
+		$this->assertArrayNotHasKey( 'zctz_ollama_connection', $tests['direct'] ?? array() );
+
+		$test = $tests['async']['zctz_ollama_connection'];
+
+		$this->assertSame( 'zctz-ollama-connection', $test['test'] );
+		$this->assertFalse( $test['has_rest'] );
+		$this->assertIsCallable( $test['async_direct_test'] );
+		$this->assertStringNotContainsString(
+			'_',
+			$test['test'],
+			"Core's Site Health script rewrites only the first underscore, so the slug must not contain one."
+		);
+	}
 }

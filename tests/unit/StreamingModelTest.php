@@ -60,7 +60,10 @@ class StreamingModelTest extends TestCase {
 		}
 		$this->assertTrue( $ready, 'The streaming fixture server did not start.' );
 
-		$GLOBALS['zctz_test_options'] = array(
+		$GLOBALS['zctz_test_http_responses'] = array();
+		$GLOBALS['zctz_test_http_requests']  = array();
+		$GLOBALS['zctz_test_hooks']          = array();
+		$GLOBALS['zctz_test_options']        = array(
 			'zctz_ollama_ai_connector_settings' => array(
 				'connection_type' => 'self_hosted',
 				'host'            => 'http://127.0.0.1',
@@ -171,5 +174,83 @@ class StreamingModelTest extends TestCase {
 			array( new UserMessage( array( new MessagePart( 'Hello' ) ) ) ),
 			static function (): void {}
 		);
+	}
+
+	private function unterminatedModel(): OllamaTextGenerationModel {
+		return new OllamaTextGenerationModel(
+			new ModelMetadata( 'unterminated-model', 'Unterminated', array( CapabilityEnum::textGeneration(), CapabilityEnum::chatHistory() ), array() ),
+			new ProviderMetadata( 'ollama', 'Ollama', ProviderTypeEnum::cloud(), null, RequestAuthenticationMethod::apiKey() )
+		);
+	}
+
+	public function test_the_trailing_block_is_parsed_when_the_caller_is_still_listening(): void {
+		$result = $this->unterminatedModel()->generateOllamaStreamResult(
+			array( new UserMessage( array( new MessagePart( 'Hello' ) ) ) ),
+			static function ( array $event ): void {
+				unset( $event );
+			}
+		);
+
+		$this->assertSame( 'FIRST TRAILING', $result->toText() );
+	}
+
+	public function test_nothing_is_delivered_after_the_caller_cancels(): void {
+		$events = array();
+		$result = $this->unterminatedModel()->generateOllamaStreamResult(
+			array( new UserMessage( array( new MessagePart( 'Hello' ) ) ) ),
+			static function ( array $event ) use ( &$events ) {
+				$events[] = $event;
+				return 'content_delta' !== $event['type'];
+			}
+		);
+
+		$deltas = array();
+		foreach ( $events as $event ) {
+			if ( 'content_delta' === $event['type'] ) {
+				$deltas[] = $event['delta'];
+			}
+		}
+
+		$this->assertSame( array( 'FIRST ' ), $deltas, 'The trailing block must not be delivered after a cancel.' );
+		$this->assertSame( 'FIRST ', $result->toText(), 'The partial result must hold only what the caller was told about.' );
+	}
+
+	public function test_a_callback_failure_on_the_trailing_block_is_reported(): void {
+		$this->expectException( RuntimeException::class );
+		$this->expectExceptionMessage( 'The Ollama stream callback failed' );
+
+		$this->unterminatedModel()->generateOllamaStreamResult(
+			array( new UserMessage( array( new MessagePart( 'Hello' ) ) ) ),
+			static function ( array $event ): void {
+				if ( 'content_delta' === $event['type'] && 'TRAILING' === $event['delta'] ) {
+					throw new \LogicException( 'boom' );
+				}
+			}
+		);
+	}
+
+	public function test_a_callback_failure_on_the_done_event_is_reported(): void {
+		$this->expectException( RuntimeException::class );
+		$this->expectExceptionMessage( 'The Ollama stream callback failed' );
+
+		$this->unterminatedModel()->generateOllamaStreamResult(
+			array( new UserMessage( array( new MessagePart( 'Hello' ) ) ) ),
+			static function ( array $event ): void {
+				if ( 'done' === $event['type'] ) {
+					throw new \LogicException( 'boom' );
+				}
+			}
+		);
+	}
+
+	public function test_the_stream_asks_ollama_to_include_usage(): void {
+		$result = $this->unterminatedModel()->generateOllamaStreamResult(
+			array( new UserMessage( array( new MessagePart( 'Hello' ) ) ) ),
+			static function ( array $event ): void {
+				unset( $event );
+			}
+		);
+
+		$this->assertNotNull( $result->getTokenUsage() );
 	}
 }

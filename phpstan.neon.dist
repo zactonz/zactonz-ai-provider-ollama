@@ -8,6 +8,7 @@ parameters:
     maximumNumberOfProcesses: 1
   paths:
     - igniter.php
+    - uninstall.php
     - includes
   excludePaths:
     analyse:

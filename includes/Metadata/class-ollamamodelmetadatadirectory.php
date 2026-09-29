@@ -9,6 +9,10 @@ declare( strict_types=1 );
 
 namespace Zactonz\AiProviderForOllama\Metadata;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 use Zactonz\AiProviderForOllama\Provider\OllamaProvider;
 use Zactonz\AiProviderForOllama\Settings\OllamaSettings;
 use WordPress\AiClient\Files\Enums\FileTypeEnum;
@@ -130,14 +134,22 @@ class OllamaModelMetadataDirectory extends AbstractApiBasedModelMetadataDirector
 		// phpcs:ignore Generic.Commenting.DocComment.MissingShort
 		/** @var TagsResponseData $tags_data */
 		$tags_data = $response->getData();
-		if ( ! isset( $tags_data['models'] ) ) {
+		if ( ! isset( $tags_data['models'] ) || ! is_array( $tags_data['models'] ) ) {
 			throw ResponseException::fromMissingData( 'Ollama', 'models' );
 		}
 
 		$models_map = array();
 		foreach ( $tags_data['models'] as $model_entry ) {
-			$model_name = $model_entry['name'];
-			$metadata   = $this->buildModelMetadata( $model_name, $this->fetchModelDetails( $model_name ) );
+			if ( ! is_array( $model_entry ) ) {
+				continue;
+			}
+
+			$model_name = isset( $model_entry['name'] ) ? $model_entry['name'] : ( $model_entry['model'] ?? '' );
+			if ( ! is_string( $model_name ) || '' === $model_name ) {
+				continue;
+			}
+
+			$metadata = $this->buildModelMetadata( $model_name, $this->fetchModelDetails( $model_name ) );
 			if ( null === $metadata ) {
 				continue;
 			}
@@ -166,12 +178,16 @@ class OllamaModelMetadataDirectory extends AbstractApiBasedModelMetadataDirector
 		// phpcs:ignore Generic.Commenting.DocComment.MissingShort
 		/** @var ModelsResponseData $models_data */
 		$models_data = $response->getData();
-		if ( ! isset( $models_data['data'] ) ) {
+		if ( ! isset( $models_data['data'] ) || ! is_array( $models_data['data'] ) ) {
 			throw ResponseException::fromMissingData( 'Ollama Cloud', 'data' );
 		}
 
 		$models_map = array();
 		foreach ( $models_data['data'] as $model_entry ) {
+			if ( ! is_array( $model_entry ) ) {
+				continue;
+			}
+
 			$model_name = isset( $model_entry['id'] ) ? $model_entry['id'] : ( $model_entry['name'] ?? '' );
 			if ( ! is_string( $model_name ) || '' === $model_name ) {
 				continue;
@@ -189,8 +205,16 @@ class OllamaModelMetadataDirectory extends AbstractApiBasedModelMetadataDirector
 	}
 
 	/**
-	 * Sorts model metadata and places the preferred model first.
+	 * Sorts model metadata and places each configured default first.
 	 *
+	 * Listing order is how a provider expresses a preference to the AI Client:
+	 * asked for a capability, the client filters this list to the models that
+	 * support it and takes the first one left. Each configured default therefore
+	 * goes to the front, most specific capability last, so that the text default
+	 * leads a plain text request while a request that needs vision, images or
+	 * embeddings still reaches the default chosen for it.
+	 *
+	 * @since 1.2.0 Every capability's default leads, not only the text one.
 	 * @since 1.0.0
 	 *
 	 * @param array<string, ModelMetadata> $models_map Models keyed by model ID.
@@ -198,16 +222,24 @@ class OllamaModelMetadataDirectory extends AbstractApiBasedModelMetadataDirector
 	 */
 	private function sortModelsMap( array $models_map ): array {
 		ksort( $models_map );
-		$preferred_model = OllamaSettings::get_preferred_model( 'text' );
-		if ( '' !== $preferred_model && isset( $models_map[ $preferred_model ] ) ) {
-			$model      = $models_map[ $preferred_model ];
-			$models_map = array( $preferred_model => $model ) + array_diff_key(
-				$models_map,
-				array( $preferred_model => true )
-			);
+
+		$leading = array();
+
+		foreach ( array( 'embedding', 'image', 'vision', 'tools', 'text' ) as $capability ) {
+			$preferred = OllamaSettings::get_preferred_model( $capability );
+
+			if ( '' === $preferred || ! isset( $models_map[ $preferred ] ) ) {
+				continue;
+			}
+
+			$leading = array( $preferred => $models_map[ $preferred ] ) + $leading;
 		}
 
-		return $models_map;
+		if ( array() === $leading ) {
+			return $models_map;
+		}
+
+		return $leading + array_diff_key( $models_map, $leading );
 	}
 
 	/**

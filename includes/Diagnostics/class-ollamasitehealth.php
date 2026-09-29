@@ -9,6 +9,10 @@ declare( strict_types=1 );
 
 namespace Zactonz\AiProviderForOllama\Diagnostics;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 use Zactonz\AiProviderForOllama\Settings\OllamaSettings;
 
 /**
@@ -18,6 +22,8 @@ use Zactonz\AiProviderForOllama\Settings\OllamaSettings;
  */
 class OllamaSiteHealth {
 
+	private const TEST_SLUG = 'zctz-ollama-connection';
+
 	/**
 	 * Registers Site Health hooks.
 	 *
@@ -26,23 +32,46 @@ class OllamaSiteHealth {
 	public function init(): void {
 		add_filter( 'site_status_tests', array( $this, 'register_tests' ) );
 		add_filter( 'debug_information', array( $this, 'add_debug_information' ) );
+		add_action( 'wp_ajax_health-check-' . self::TEST_SLUG, array( $this, 'ajax_test_connection' ) );
 	}
 
 	/**
-	 * Registers a direct connectivity test.
+	 * Registers the connectivity test.
 	 *
+	 * The test reaches Ollama over the network, so it is asynchronous. A direct test
+	 * held the Site Health screen open for the length of the request, up to the full
+	 * request timeout whenever Ollama was not running.
+	 *
+	 * @since 1.2.0 The test is asynchronous.
 	 * @since 1.1.0
 	 *
 	 * @param array<string, mixed> $tests Existing tests.
 	 * @return array<string, mixed> Tests including Ollama.
 	 */
 	public function register_tests( array $tests ): array {
-		$tests['direct']['zctz_ollama_connection'] = array(
-			'label' => __( 'Ollama connection', 'zactonz-ai-provider-ollama' ),
-			'test'  => array( $this, 'test_connection' ),
+		$tests['async']['zctz_ollama_connection'] = array(
+			'label'             => __( 'Ollama connection', 'zactonz-ai-provider-ollama' ),
+			'test'              => self::TEST_SLUG,
+			'has_rest'          => false,
+			'async_direct_test' => array( $this, 'test_connection' ),
 		);
 
 		return $tests;
+	}
+
+	/**
+	 * Answers the asynchronous connectivity test.
+	 *
+	 * @since 1.2.0
+	 */
+	public function ajax_test_connection(): void {
+		check_ajax_referer( 'health-check-site-status' );
+
+		if ( ! current_user_can( 'view_site_health_checks' ) ) {
+			wp_send_json_error();
+		}
+
+		wp_send_json_success( $this->test_connection() );
 	}
 
 	/**
@@ -60,7 +89,7 @@ class OllamaSiteHealth {
 			'label'       => $connected
 				? __( 'Ollama is connected', 'zactonz-ai-provider-ollama' )
 				: __( 'Ollama is not reachable', 'zactonz-ai-provider-ollama' ),
-			'status'      => $connected ? 'good' : 'critical',
+			'status'      => $connected ? 'good' : 'recommended',
 			'badge'       => array(
 				'label' => __( 'AI', 'zactonz-ai-provider-ollama' ),
 				'color' => 'blue',
@@ -120,7 +149,7 @@ class OllamaSiteHealth {
 		}
 
 		$info['zctz_ollama'] = array(
-			'label'  => __( 'Zactonz AI Connector: Ollama', 'zactonz-ai-provider-ollama' ),
+			'label'  => __( 'Zactonz AI Connector for Ollama', 'zactonz-ai-provider-ollama' ),
 			'fields' => $fields,
 		);
 

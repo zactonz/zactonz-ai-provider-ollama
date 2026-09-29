@@ -10,6 +10,10 @@ declare( strict_types=1 );
 
 namespace Zactonz\AiProviderForOllama\Models\Traits;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 use WordPress\AiClient\Providers\Http\DTO\RequestOptions;
 
 /**

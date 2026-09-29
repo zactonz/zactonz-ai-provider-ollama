@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve Zactonz AI Connector: Ollama.
+Thanks for helping improve Zactonz AI Connector for Ollama.
 
 ## Local Setup
 

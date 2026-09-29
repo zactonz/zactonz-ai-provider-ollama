@@ -116,6 +116,20 @@ function add_filter( $hook, $callback, $priority = 10, $accepted_args = 1 ) {
 	return add_action( $hook, $callback, $priority, $accepted_args );
 }
 
+function remove_action( $hook, $callback, $priority = 10 ) {
+	foreach ( $GLOBALS['zctz_test_hooks'][ $hook ] ?? array() as $index => $registered ) {
+		if ( $registered[0] === $callback && $registered[1] === $priority ) {
+			unset( $GLOBALS['zctz_test_hooks'][ $hook ][ $index ] );
+		}
+	}
+
+	return true;
+}
+
+function remove_filter( $hook, $callback, $priority = 10 ) {
+	return remove_action( $hook, $callback, $priority );
+}
+
 function plugin_dir_path( $file ) {
 	return rtrim( dirname( $file ), '/\\' ) . '/';
 }
@@ -156,6 +170,76 @@ function wp_remote_get( $url, $args = array() ) {
 		return new WP_Error( 'no_response', 'No test HTTP response was queued.' );
 	}
 	return array_shift( $GLOBALS['zctz_test_http_responses'] );
+}
+
+/**
+ * Stands in for the HTTP API's transport layer.
+ *
+ * Requests dispatches request.progress with each block of the body, and WordPress
+ * forwards it as the requests-request.progress action. Mirroring that here is what
+ * keeps the streaming tests honest: they drive the same code path a real site
+ * takes, against a real socket.
+ */
+function zctz_test_dispatch_progress( $chunk ) {
+	foreach ( $GLOBALS['zctz_test_hooks']['requests-request.progress'] ?? array() as $registered ) {
+		$registered[0]( $chunk, 0, false );
+	}
+}
+
+function wp_remote_post( $url, $args = array() ) {
+	if ( empty( $GLOBALS['zctz_test_hooks']['requests-request.progress'] ) || ! empty( $GLOBALS['zctz_test_http_responses'] ) ) {
+		if ( empty( $GLOBALS['zctz_test_http_responses'] ) ) {
+			return new WP_Error( 'no_response', 'No test HTTP response was queued.' );
+		}
+		return array_shift( $GLOBALS['zctz_test_http_responses'] );
+	}
+
+	$handle  = curl_init( $url );
+	$status  = 0;
+	$body    = '';
+	$headers = array();
+
+	foreach ( (array) ( $args['headers'] ?? array() ) as $name => $value ) {
+		$headers[] = $name . ': ' . $value;
+	}
+
+	curl_setopt_array(
+		$handle,
+		array(
+			CURLOPT_POST           => true,
+			CURLOPT_POSTFIELDS     => $args['body'] ?? '',
+			CURLOPT_HTTPHEADER     => $headers,
+			CURLOPT_FOLLOWLOCATION => false,
+			CURLOPT_CONNECTTIMEOUT => 10,
+			CURLOPT_TIMEOUT        => (int) ( $args['timeout'] ?? 30 ),
+			CURLOPT_HEADERFUNCTION => function ( $curl_handle, $header ) use ( &$status ) {
+				unset( $curl_handle );
+				if ( preg_match( '#^HTTP/\S+\s+(\d{3})#', $header, $matches ) ) {
+					$status = (int) $matches[1];
+				}
+				return strlen( $header );
+			},
+			CURLOPT_WRITEFUNCTION  => function ( $curl_handle, $chunk ) use ( &$body ) {
+				unset( $curl_handle );
+				zctz_test_dispatch_progress( $chunk );
+				$body .= $chunk;
+				return strlen( $chunk );
+			},
+		)
+	);
+
+	$result = curl_exec( $handle );
+	$error  = curl_error( $handle );
+	unset( $result );
+
+	if ( '' !== $error ) {
+		return new WP_Error( 'http_request_failed', $error );
+	}
+
+	return array(
+		'response' => array( 'code' => $status ),
+		'body'     => $body,
+	);
 }
 
 function wp_remote_retrieve_response_code( $response ) {

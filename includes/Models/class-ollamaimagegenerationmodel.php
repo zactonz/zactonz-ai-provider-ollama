@@ -10,6 +10,10 @@ declare( strict_types=1 );
 
 namespace Zactonz\AiProviderForOllama\Models;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 use Zactonz\AiProviderForOllama\Models\Traits\OllamaRequestOptionsTrait;
 use Zactonz\AiProviderForOllama\Provider\OllamaProvider;
 use WordPress\AiClient\Common\Exception\InvalidArgumentException;

@@ -15,6 +15,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 use WP_Error;
 use Zactonz\AiProviderForOllama\Diagnostics\OllamaDiagnostics;
+use Zactonz\AiProviderForOllama\Provider\OllamaProviderAvailability;
 use WordPress\AiClient\AiClient;
 use WordPress\AiClient\Providers\Http\DTO\ApiKeyRequestAuthentication;
 
@@ -56,6 +57,8 @@ class OllamaSettings {
 	 */
 	public function init(): void {
 		add_action( 'admin_init', array( $this, 'maybe_migrate_legacy_settings' ), 5 );
+		add_action( 'add_option_' . self::core_api_key_option(), array( self::class, 'on_connector_api_key_added' ), 10, 2 );
+		add_action( 'update_option_' . self::core_api_key_option(), array( self::class, 'on_connector_api_key_updated' ), 10, 2 );
 		add_action( 'admin_init', array( $this, 'register_settings' ) );
 		add_action( 'admin_menu', array( $this, 'register_settings_screen' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_settings_script' ) );
@@ -64,13 +67,6 @@ class OllamaSettings {
 		add_action( 'wp_ajax_' . self::AJAX_MODEL_CAPABILITIES_ACTION, array( $this, 'ajax_model_capabilities' ) );
 		add_action( 'wp_ajax_' . self::AJAX_SAVE_CONNECTION_ACTION, array( $this, 'ajax_save_connection' ) );
 		add_action( 'wp_ajax_' . self::AJAX_DIAGNOSTICS_ACTION, array( $this, 'ajax_diagnostics' ) );
-		add_filter( 'wpai_has_ai_credentials', array( $this, 'is_connected' ) );
-		add_filter( 'wpai_is_ollama_connector_configured', array( $this, 'is_connected' ) );
-		add_filter( 'wpai_preferred_text_models', array( $this, 'prepend_default_text_model_preference' ) );
-		add_filter( 'wpai_preferred_image_models', array( $this, 'prepend_default_image_model_preference' ) );
-		add_filter( 'wpai_preferred_vision_models', array( $this, 'prepend_default_vision_model_preference' ) );
-		add_filter( 'wpai_preferred_embedding_models', array( $this, 'prepend_default_embedding_model_preference' ) );
-		add_filter( 'wpai_preferred_tool_models', array( $this, 'prepend_default_tools_model_preference' ) );
 	}
 
 	/**
@@ -102,6 +98,17 @@ class OllamaSettings {
 				update_option( self::OPTION_NAME, $current_settings, false );
 			}
 		}
+
+		/*
+		 * Sites upgrading from before 1.2.0 already have a key in one of the
+		 * plugin's own options. Copy the active one across once so the Connectors
+		 * screen shows the credential the site is already using.
+		 */
+		if ( false === get_option( self::core_api_key_option(), false ) ) {
+			self::mirror_active_api_key();
+		}
+
+		self::adopt_existing_connector_api_key();
 
 		$this->set_active_request_authentication();
 	}
@@ -807,6 +814,12 @@ class OllamaSettings {
 			true
 		);
 
+		wp_set_script_translations(
+			'zactonz-ai-provider-ollama-settings',
+			'zactonz-ai-provider-ollama',
+			ZCTZ_OLLAMA_AI_CONNECTOR_PLUGIN_DIR . 'languages'
+		);
+
 		wp_enqueue_style(
 			'zactonz-ai-provider-ollama-settings',
 			plugins_url( 'admin/style-settings.css', ZCTZ_OLLAMA_AI_CONNECTOR_PLUGIN_FILE ),
@@ -960,7 +973,8 @@ class OllamaSettings {
 		$models = $this->get_models();
 
 		if ( is_wp_error( $models ) ) {
-			wp_send_json_error( $models->get_error_message(), $models->get_error_code() );
+			$status = $models->get_error_data();
+			wp_send_json_error( $models->get_error_message(), is_int( $status ) ? $status : 500 );
 		}
 
 		$descriptors = array();
@@ -1086,7 +1100,9 @@ class OllamaSettings {
 
 		$settings = $this->sanitize_settings( $settings );
 		update_option( self::OPTION_NAME, $settings );
+		self::mirror_active_api_key();
 		$this->invalidate_model_cache();
+		OllamaProviderAvailability::flush();
 
 		$verification = $this->verify_connection();
 		if ( is_wp_error( $verification ) ) {
@@ -1106,16 +1122,6 @@ class OllamaSettings {
 		);
 	}
 
-	/**
-	 * Checks if the Ollama provider is connected.
-	 *
-	 * @since 1.1.0
-	 *
-	 * @return bool True if an Ollama endpoint is reachable, false otherwise.
-	 */
-	public function is_connected(): bool {
-		return ! is_wp_error( $this->verify_connection() );
-	}
 
 	/**
 	 * Verifies the active Ollama connection.
@@ -1324,103 +1330,12 @@ class OllamaSettings {
 		return $headers;
 	}
 
-	/**
-	 * Prepends the default Ollama model to a WordPress AI model preference list.
-	 *
-	 * @since 1.0.0
-	 *
-	 * @param array<int, array{string, string}> $models Existing preferred models.
-	 * @return array<int, array{string, string}> Preferred models with Ollama first.
-	 */
-	public function prepend_default_model_preference( array $models ): array {
-		return $this->prepend_model_preference( $models, self::get_preferred_model( 'text' ) );
-	}
 
-	/**
-	 * Prepends the default text model.
-	 *
-	 * @since 1.1.0
-	 * @param array<int, mixed> $models Existing preferences.
-	 * @return array<int, mixed> Updated preferences.
-	 */
-	public function prepend_default_text_model_preference( array $models ): array {
-		return $this->prepend_model_preference( $models, self::get_preferred_model( 'text' ) );
-	}
 
-	/**
-	 * Prepends the default vision model.
-	 *
-	 * @since 1.1.0
-	 * @param array<int, mixed> $models Existing preferences.
-	 * @return array<int, mixed> Updated preferences.
-	 */
-	public function prepend_default_vision_model_preference( array $models ): array {
-		return $this->prepend_model_preference( $models, self::get_preferred_model( 'vision' ) );
-	}
 
-	/**
-	 * Prepends the default image model.
-	 *
-	 * @since 1.1.0
-	 * @param array<int, mixed> $models Existing preferences.
-	 * @return array<int, mixed> Updated preferences.
-	 */
-	public function prepend_default_image_model_preference( array $models ): array {
-		return $this->prepend_model_preference( $models, self::get_preferred_model( 'image' ) );
-	}
 
-	/**
-	 * Prepends the default embedding model.
-	 *
-	 * @since 1.1.0
-	 * @param array<int, mixed> $models Existing preferences.
-	 * @return array<int, mixed> Updated preferences.
-	 */
-	public function prepend_default_embedding_model_preference( array $models ): array {
-		return $this->prepend_model_preference( $models, self::get_preferred_model( 'embedding' ) );
-	}
 
-	/**
-	 * Prepends the default tool-calling model.
-	 *
-	 * @since 1.1.0
-	 * @param array<int, mixed> $models Existing preferences.
-	 * @return array<int, mixed> Updated preferences.
-	 */
-	public function prepend_default_tools_model_preference( array $models ): array {
-		return $this->prepend_model_preference( $models, self::get_preferred_model( 'tools' ) );
-	}
 
-	/**
-	 * Prepends one Ollama model without adding duplicates.
-	 *
-	 * @since 1.1.0
-	 *
-	 * @param array<int, mixed> $models Existing preferences.
-	 * @param string            $model_id Ollama model ID.
-	 * @return array<int, mixed> Updated preferences.
-	 */
-	private function prepend_model_preference( array $models, string $model_id ): array {
-		if ( '' === $model_id ) {
-			return $models;
-		}
-
-		$models = array_values(
-			array_filter(
-				$models,
-				static function ( $model ) use ( $model_id ): bool {
-					return ! is_array( $model )
-						|| ! isset( $model[0], $model[1] )
-						|| 'ollama' !== $model[0]
-						|| $model_id !== $model[1];
-				}
-			)
-		);
-
-		array_unshift( $models, array( 'ollama', $model_id ) );
-
-		return $models;
-	}
 
 	/**
 	 * Gets the models from the Ollama provider.
@@ -1536,6 +1451,7 @@ class OllamaSettings {
 
 		if ( ! empty( $value[ $clear_field ] ) ) {
 			update_option( $option_name, '', false );
+			self::mirror_active_api_key();
 			return;
 		}
 
@@ -1549,6 +1465,84 @@ class OllamaSettings {
 		}
 
 		update_option( $option_name, $api_key, false );
+		self::mirror_active_api_key();
+	}
+
+	/**
+	 * Returns the API key option WordPress registers for this connector.
+	 *
+	 * @since 1.2.0
+	 *
+	 * @return string Option name.
+	 */
+	public static function core_api_key_option(): string {
+		return 'connectors_ai_ollama_api_key';
+	}
+
+	/**
+	 * Copies the active connection's key into the option core reads.
+	 *
+	 * The plugin keeps one key per connection type, so switching between Cloud and
+	 * self-hosted does not throw the other key away. WordPress registers a single
+	 * key per connector, so that one holds whichever is currently in use and the
+	 * Connectors screen and the plugin's own screen always agree.
+	 *
+	 * @since 1.2.0
+	 */
+	public static function mirror_active_api_key(): void {
+		update_option( self::core_api_key_option(), self::get_active_saved_api_key(), false );
+		self::remember_shared_key_mode( self::get_connection_type() );
+	}
+
+	/**
+	 * Records which connection mode the shared connector key belongs to.
+	 *
+	 * @since 1.2.0
+	 *
+	 * @param string $connection_type Connection type that owns the key.
+	 */
+	private static function remember_shared_key_mode( string $connection_type ): void {
+		$settings = self::get_settings();
+
+		if ( isset( $settings['shared_key_mode'] ) && $settings['shared_key_mode'] === $connection_type ) {
+			return;
+		}
+
+		$settings['shared_key_mode'] = $connection_type;
+		update_option( self::OPTION_NAME, $settings, false );
+	}
+
+	/**
+	 * Files a key already sitting in the connector option under the mode that owns it.
+	 *
+	 * The write hook catches a key as the Connectors screen saves it. A key that was
+	 * already there before this version, or written by something that did not change
+	 * its value, needs this catch-up. It only ever fills the mode recorded as owning
+	 * the key, so a credential cannot be moved to the other endpoint.
+	 *
+	 * @since 1.2.0
+	 */
+	public static function adopt_existing_connector_api_key(): void {
+		$connection_type = self::get_connection_type();
+
+		if ( '' !== self::get_saved_api_key_for_connection( $connection_type ) ) {
+			return;
+		}
+
+		$shared = get_option( self::core_api_key_option(), '' );
+
+		if ( ! is_string( $shared ) || '' === $shared ) {
+			return;
+		}
+
+		$settings = self::get_settings();
+		$owner    = isset( $settings['shared_key_mode'] ) ? (string) $settings['shared_key_mode'] : '';
+
+		if ( '' !== $owner && $owner !== $connection_type ) {
+			return;
+		}
+
+		self::adopt_connector_api_key( $shared );
 	}
 
 	/**
@@ -1588,6 +1582,34 @@ class OllamaSettings {
 			'ollama',
 			new ApiKeyRequestAuthentication( $api_key )
 		);
+	}
+
+	/**
+	 * Adopts a connector key on first write.
+	 *
+	 * @since 1.2.0
+	 *
+	 * @param string $option Option name.
+	 * @param mixed  $value  Option value.
+	 */
+	public static function on_connector_api_key_added( $option, $value ): void {
+		unset( $option );
+
+		self::adopt_connector_api_key( $value );
+	}
+
+	/**
+	 * Adopts a connector key on a later write.
+	 *
+	 * @since 1.2.0
+	 *
+	 * @param mixed $old_value Previous option value.
+	 * @param mixed $value     New option value.
+	 */
+	public static function on_connector_api_key_updated( $old_value, $value ): void {
+		unset( $old_value );
+
+		self::adopt_connector_api_key( $value );
 	}
 
 	/**
@@ -1669,6 +1691,34 @@ class OllamaSettings {
 		$api_key = get_option( self::get_api_key_option_name_for_connection( $connection_type ), '' );
 
 		return is_string( $api_key ) ? $api_key : '';
+	}
+
+	/**
+	 * Copies a key written to the connector option into the active mode's own option.
+	 *
+	 * The Connectors screen writes the option WordPress registers for this
+	 * connector without knowing that Ollama keeps one key per connection mode. This
+	 * runs on that write and files the key under the mode in use at the time, so a
+	 * Cloud credential can never be handed to a self-hosted address, or the other
+	 * way round, when the mode is later switched.
+	 *
+	 * @since 1.2.0
+	 *
+	 * @param mixed $value Value written to the connector option.
+	 */
+	public static function adopt_connector_api_key( $value ): void {
+		if ( ! is_string( $value ) || '' === $value ) {
+			return;
+		}
+
+		$option = self::get_api_key_option_name_for_connection( self::get_connection_type() );
+
+		if ( get_option( $option, '' ) === $value ) {
+			return;
+		}
+
+		update_option( $option, $value, false );
+		self::remember_shared_key_mode( self::get_connection_type() );
 	}
 
 	/**

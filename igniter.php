@@ -1,11 +1,11 @@
 <?php
 /**
- * Plugin Name:       Zactonz AI Connector: Ollama
+ * Plugin Name:       Zactonz AI Connector for Ollama
  * Plugin URI:        https://github.com/zactonz/zactonz-ai-provider-ollama
  * Description:       Adds an Ollama connector to Settings > Connectors for the WordPress AI Client, local Ollama, self-hosted Ollama, and Ollama Cloud.
  * Requires at least: 7.0
  * Requires PHP:      7.4
- * Version:           1.1.0
+ * Version:           1.2.0
  * Author:            Zactonz Technologies
  * Author URI:        https://zactonz.com/
  * License:           GPL-2.0-or-later
@@ -63,7 +63,7 @@ function zctz_check_php_version(): bool {
 				zctz_requirement_notice(
 					sprintf(
 						/* translators: 1: Required PHP version, 2: Current PHP version */
-						__( 'The Zactonz AI Connector: Ollama requires PHP version %1$s or higher. You are running PHP version %2$s.', 'zactonz-ai-provider-ollama' ),
+						__( 'Zactonz AI Connector for Ollama requires PHP version %1$s or higher. You are running PHP version %2$s.', 'zactonz-ai-provider-ollama' ),
 						ZCTZ_OLLAMA_AI_CONNECTOR_MIN_PHP_VERSION,
 						PHP_VERSION
 					)
@@ -95,7 +95,7 @@ function zctz_check_wp_version(): bool {
 				zctz_requirement_notice(
 					sprintf(
 						/* translators: 1: Required WordPress version, 2: Current WordPress version */
-						__( 'The Zactonz AI Connector: Ollama requires WordPress version %1$s or higher. You are running WordPress version %2$s.', 'zactonz-ai-provider-ollama' ),
+						__( 'Zactonz AI Connector for Ollama requires WordPress version %1$s or higher. You are running WordPress version %2$s.', 'zactonz-ai-provider-ollama' ),
 						ZCTZ_OLLAMA_AI_CONNECTOR_MIN_WP_VERSION,
 						$wp_version
 					)
@@ -162,6 +162,8 @@ function zctz_load(): void {
 	}
 
 	spl_autoload_register( __NAMESPACE__ . '\\zctz_autoload' );
+
+	$loaded = true;
 
 	// Initialize the plugin.
 	$plugin = new Plugin();

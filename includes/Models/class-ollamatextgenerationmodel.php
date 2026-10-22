@@ -71,6 +71,7 @@ class OllamaTextGenerationModel extends AbstractOpenAiCompatibleTextGenerationMo
 	 * @param HttpMethodEnum                          $method The HTTP method.
 	 * @param string                                  $path The request path.
 	 * @param array<string, string|array<int,string>> $headers Request headers.
+	 * @phpstan-param array<string, string|list<string>> $headers
 	 * @param mixed                                   $data Request body data.
 	 * @return Request The prepared request.
 	 */
@@ -131,6 +132,7 @@ class OllamaTextGenerationModel extends AbstractOpenAiCompatibleTextGenerationMo
 	 * @since 1.1.0
 	 *
 	 * @param array<int, Message> $prompt Prompt messages accepted by generateTextResult().
+	 * @phpstan-param list<Message> $prompt
 	 * @param callable            $on_event Receives each normalized stream event.
 	 * @return GenerativeAiResult Aggregated result.
 	 * @throws RuntimeException When streaming is unavailable, cancelled by an exception, or the transfer fails.
@@ -305,6 +307,19 @@ class OllamaTextGenerationModel extends AbstractOpenAiCompatibleTextGenerationMo
 			}
 		};
 
+		/*
+		 * wp_json_encode() returns false on data it cannot encode, malformed UTF-8 in
+		 * post content being the realistic case. Passing that to wp_remote_post sends
+		 * an empty body and Ollama answers with a puzzling error, so say what actually
+		 * went wrong instead.
+		 */
+		$body = wp_json_encode( $params );
+
+		if ( false === $body ) {
+			// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception text is not rendered directly.
+			throw new RuntimeException( 'The Ollama streaming request could not be encoded: ' . json_last_error_msg() );
+		}
+
 		add_action( 'requests-request.progress', $progress, 10, 1 );
 
 		try {
@@ -312,7 +327,7 @@ class OllamaTextGenerationModel extends AbstractOpenAiCompatibleTextGenerationMo
 				$url,
 				array(
 					'headers'     => $headers,
-					'body'        => wp_json_encode( $params ),
+					'body'        => $body,
 					'timeout'     => (int) ceil( OllamaSettings::get_text_request_timeout() ),
 					'redirection' => 0,
 					'httpversion' => '1.1',
